@@ -8,10 +8,13 @@ LimitTrackerの先頭ガード -> LLM生成 -> <end_code>除去 -> コード抽�
  のループを回す。
  final_answer()で成功終了、ハード制限で打ち切り。
 """
+from collections.abc import Callable
+
 from src.agent.extractor.code_extractor import CodeExtractor
 from src.agent.limits import LimitTracker
 from src.agent.llm.provider.provider import LLMGenerator, LLMResponse, LLMError
-from src.agent.observation import build_observation, observation_no_code
+from src.agent.extractor.python_extractor import was_salvaged
+from src.agent.observation import build_observation, malformed_code_note, observation_no_code
 from src.agent.llm.transport.transport import TransportError
 from src.agent.prompt.task_profile.task_profile import TaskProfile
 from src.agent.prompt.template import build_system_prompt
@@ -34,14 +37,27 @@ class Orchestrator:
         profile: TaskProfile,
         limits: Limits,
         stop_sequence: list[str] | None = None,
+        solution_verifier: Callable[[str], tuple[bool, str]] | None = None,
     ) -> None:
-        """依存部品を注入してOrchestratorを初期化する."""
+        """依存部品を注入してOrchestratorを初期化する.
+
+        Args:
+            provider (LLMGenerator): 1回の生成を行うLLMクライアント(単体 / 粘り付き)。
+            extractor (CodeExtractor): LLM出力から実行コードを取り出す抽出器。
+            sandbox (SandboxBase): コードを実行するサンドボックス。
+            profile (TaskProfile): タスク種別ごとのプロンプト差分。
+            limits (Limits): 反復 / トークン / 時間のハード制限。
+            stop_sequence (list[str] | None): 生成停止文字列。Noneなら既定の ["<end_code>"]。
+            solution_verifier (Callable[[str], tuple[bool, str]] | None): 提出コードを受理前に
+                検証する関数。(合否, 詳細)を返す。Noneなら構文検査のみで受理する。
+        """
         self.provider = provider
         self.extractor = extractor
         self.sandbox = sandbox
         self.profile = profile
         self.limits = limits
         self.stop_sequences = stop_sequence if stop_sequence is not None else list(_DEFAULT_STOP_SEQUENCE)
+        self.solution_verifier = solution_verifier
 
     def run(self, task_id: str, benchmark: str, task_message: str) -> SolutionOutput:
         """1タスク分のループを回しSolutionOutputを生成する.
@@ -135,22 +151,48 @@ class Orchestrator:
             # コードが抽出できた場合は、サンドボックスで実行し、Observationを生成する
             result: ExecuteResult = self.sandbox.run(code)
             observation = build_observation(result)
+            # 閉じフェンスが欠けたブロックを救済実行した場合は、その事実をLLMに明示する
+            if was_salvaged(response.text):
+                observation = f"{malformed_code_note()}\n{observation}"
+
+            # final_answer()が呼ばれていれば、提出物を検査する。
+            # 採点側は提出コードに隠しテストを連結して実行するため、
+            # 構文エラーや余計な文が混ざった提出はそれだけで不合格になる。
+            # 検査に落ちた提出は受理せず、理由をObservationに足してLLMに直させる。
+            submission: str | None = None
+            if result.final_answer_bool:
+                candidate = self._sanitize_solution(result.final_answer or "")
+                rejection = self._reject_reason(candidate)
+                if rejection is None and self.solution_verifier is not None:
+                    verified, detail = self.solution_verifier(candidate)
+                    if not verified:
+                        rejection = f"the submitted code did not pass the task tests: {detail}"
+                if rejection is None:
+                    submission = candidate
+                else:
+                    best_solution = candidate or best_solution
+                    observation = (
+                        f"{observation}\n--- submission rejected ---\n{rejection}\n"
+                        "Fix the solution string and call final_answer again."
+                    )
+            elif result.error is None:
+                # 提出前の作業コードは、打ち切り時のフォールバック候補として残す。
+                best_solution = code
+
             messages.append(
                 {"role": "user", "content": observation}
             )
             steps.append(
                 self._build_step(len(steps) + 1, response, code, observation)
             )
-            best_solution = code
 
-            # final_answer()が呼ばれた場合は、SolutionOutputを生成して返す
-            final_answer_value = result.final_answer or ""
-            if result.final_answer_bool and final_answer_value.strip():
+            # 検査を通った提出があれば、成功としてSolutionOutputを返す
+            if submission is not None:
                 return self._build_solution(
                     task_id=task_id,
                     benchmark=benchmark,
                     success=True,
-                    solution=final_answer_value,
+                    solution=submission,
                     tracker=tracker,
                     steps=steps,
                     system_prompt=system_prompt,
@@ -158,8 +200,50 @@ class Orchestrator:
                 )
 
     # 送信履歴の窓(直近N往復)と1メッセージの最大文字数。累積入力トークンを抑えるための切り詰め設定。
-    _HISTORY_WINDOW = 3
-    _OBS_MAX_CHARS = 1200
+    _HISTORY_WINDOW = 2
+    _OBS_MAX_CHARS = 800
+
+    @staticmethod
+    def _sanitize_solution(raw: str) -> str:
+        """final_answer()に渡された文字列を、そのまま採点に出せる形へ整える.
+
+        LLMはしばしばmarkdownのコードフェンス付きで提出する。採点側は提出文字列に
+        テスト行を連結して実行するため、フェンスが残っていると構文エラーになる。
+
+        Args:
+            raw (str): final_answer()が捕捉した生の文字列。
+
+        Returns:
+            str: 前後の空白とコードフェンスを除去した提出コード。
+        """
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            lines = lines[1:]  # ```python 等の開始フェンスを落とす
+            while lines and lines[-1].strip().startswith("```"):
+                lines.pop()
+            text = "\n".join(lines).strip()
+        return text
+
+    @staticmethod
+    def _reject_reason(solution: str) -> str | None:
+        """提出コードを受理してよいか検査し、だめな理由を返す.
+
+        Args:
+            solution (str): サニタイズ済みの提出コード。
+
+        Returns:
+            str | None: 受理可能ならNone。不可なら理由の文字列。
+        """
+        if not solution:
+            return "final_answer() received an empty value"
+        try:
+            compile(solution, "<solution>", "exec")
+        except SyntaxError as error:
+            return f"the submitted code is not valid Python ({error.msg} on line {error.lineno})"
+        if "def " not in solution:
+            return "the submitted code contains no function definition"
+        return None
 
     @staticmethod
     def _window_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:

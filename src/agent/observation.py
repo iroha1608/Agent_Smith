@@ -106,3 +106,19 @@ def observation_no_code() -> str:
             [NO_CODE] No executable Python code block was found in your message. \n\n --- note ---
     """
     return _render_observation([Status.NO_CODE], stdout="", detail="")
+
+
+def malformed_code_note() -> str:
+    """閉じフェンス無しのコードブロックを救済実行したことをLLMへ明示する一文を返す.
+
+    課題 V.1 は「崩れたコードブロックを解釈して実行したなら、それをLLMに説明する」ことを要求する。
+    黙って実行すると、LLMは自分の出力が途中で切れたことに気付かず同じ失敗を繰り返す。
+
+    Returns:
+        str: Observationの先頭に付ける説明文。
+    """
+    return (
+        "[MALFORMED_CODE] Your ```python block was never closed, so your response was cut off "
+        "by the per-turn output limit. I executed everything after the opening fence anyway. "
+        "Write shorter turns so the block closes."
+    )

@@ -1,0 +1,108 @@
+{
+  "timestamp": "2026-10-13_21-23-17",
+  "providers_file": "tools/providers_mbpp.json",
+  "count": 8,
+  "seed": 1,
+  "workers": 3,
+  "passed": 3,
+  "results": [
+    {
+      "task_id": "127",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 992,
+      "output_tokens": 209,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "80",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 1,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "error": "LLM_UNAVAILABLE",
+      "models": []
+    },
+    {
+      "task_id": "252",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 2,
+      "input_tokens": 2134,
+      "output_tokens": 265,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "251",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1021,
+      "output_tokens": 236,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "264",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 1,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "error": "LLM_UNAVAILABLE",
+      "models": []
+    },
+    {
+      "task_id": "94",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 1,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "error": "LLM_UNAVAILABLE",
+      "models": []
+    },
+    {
+      "task_id": "305",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 2,
+      "input_tokens": 1011,
+      "output_tokens": 398,
+      "error": "LLM_UNAVAILABLE",
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "247",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 2,
+      "input_tokens": 1001,
+      "output_tokens": 453,
+      "error": "LLM_UNAVAILABLE",
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    }
+  ]
+}

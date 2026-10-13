@@ -44,18 +44,16 @@ class Sandbox:
         if self.client is not None:
             try:
                 self.client.connect()
+                # 接続中サーバのツールを動的に発見し、サンドボックス名前空間へ公開する。
+                # resources / prompts も同じクライアント経由で参照できる。
                 self.tools = {
                     tool.name: MCPToolFunction(self.client, tool)
                     for tool in self.client.list_tools()
                 }
-                print(self.client.list_tools())
-                print(self.client.list_resources())
-                print(self.client.list_prompts())
             except Exception:
                 self.client.close()
                 self.client = None
                 raise
-        self.client = MCPClient(StdioClientTransport("python mcp_tools_mbpp.py"))
         self._spawn()
 
     def __enter__(self) -> "Sandbox":
@@ -140,8 +138,6 @@ class Sandbox:
 
     def run(self, code: str) -> ExecuteResult:
         """Check, exectue, and service tool calls untill the snippet ends."""
-        print(code)
-        print("=======================")
         rejection = check_code(code, self.config, frozenset(self.tools))
         if rejection:
             return ExecuteResult(error=rejection)

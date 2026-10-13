@@ -9,10 +9,11 @@ fireはagent_mbpp.py / agent_swebench.py から呼ばれ、
 - [ ] BaseAgentCliArgsモデルを作成して検証を拡充
 """
 import time
+from collections.abc import Callable
 from pathlib import Path
 from dotenv import load_dotenv
 
-from src.agent.extractor.python_extractor import PythonCodeExtractor
+from src.agent.extractor.composite_extractor import CompositeCodeExtractor
 from src.agent.llm.resilient_client import ResilientLLMClient
 # from src.agent.llm.key_manager import resolve_api_key
 # from src.agent.llm.provider.openai_compat import OpenAICompatProvider
@@ -43,6 +44,42 @@ def format_mbpp_task(task_input: MBPPTaskInput) -> str:
         lines.append("\nYour solution must pass these tests:\n")
         lines.extend(task_input.test_list)
     return "\n".join(lines)
+
+
+def make_mbpp_verifier(
+    sandbox: Sandbox,
+    test_list: list[str]
+) -> Callable[[str], tuple[bool, str]]:
+    """提出コードを受理前に可視テストで検証する関数を作る.
+
+    採点側は提出コードに隠しテストを連結して実行するため、構文エラーや
+    テスト不合格のコードを提出するとその時点で不合格になる。提出前に
+    MCPツール run_tests で同じ形の検証を行い、落ちた提出は受理させない。
+
+    Args:
+        sandbox (Sandbox): run_tests ツールを公開しているサンドボックス。
+        test_list (list[str]): タスクが与えた assert 文のリスト。
+
+    Returns:
+        Callable[[str], tuple[bool, str]]: (合否, 詳細)を返す検証関数。
+    """
+    def verify(solution: str) -> tuple[bool, str]:
+        """提出コードを run_tests に通し、(合否, 詳細)を返す."""
+        if not test_list:
+            return True, ""
+        snippet = (
+            "import json\n"
+            f"_report = json.loads(run_tests(code={solution!r}, test_list={list(test_list)!r}))\n"
+            "print('VERIFY_OK' if _report['success'] else "
+            "'VERIFY_FAIL ' + str(_report.get('output', ''))[:300])\n"
+        )
+        stdout = (sandbox.run(snippet).stdout or "").strip()
+        if "VERIFY_FAIL" in stdout:
+            return False, stdout.split("VERIFY_FAIL", 1)[1].strip()[:300]
+        # 検証そのものが動かなかった場合は受理側に倒す(正答を取り逃がさない)
+        return True, ""
+
+    return verify
 
 
 def run_mbpp_agent(
@@ -99,10 +136,11 @@ def run_mbpp_agent(
         # Provider(ResilientLLMClient) / Sandbox / Orchestrator 構築
         orchestrator = Orchestrator(
             provider=client,
-            extractor=PythonCodeExtractor(),
+            extractor=CompositeCodeExtractor(),
             sandbox=sandbox,
             profile=MBPPProfile(),
-            limits=settings.limits
+            limits=settings.limits,
+            solution_verifier=make_mbpp_verifier(sandbox, task_input.test_list)
         )
 
         # 実行 -> SolutionOutput 書き出し

@@ -2,24 +2,25 @@
 from src.agent.prompt.task_profile.task_profile import TaskProfile
 from src.models.sandbox_base import SandboxBase
 
-_MBPP_FEW_SHOT_EXAMPLE = """Thought: I'll write the function, then quickly check it with print.
+# 1ステップで「実装 -> run_testsで検証 -> 合格なら即submit」まで到す手本。
+# 反復数 / 累積トークンを最小化するため、検証と提出を同じコードブロックで行う形を示す。
+_MBPP_FEW_SHOT_EXAMPLE = '''Thought: Implement the function, verify it with the given tests, submit if they pass.
 ```python
-def add(a, b):
+solution = """def add(a, b):
     return a + b
-
-print(add(2, 3))
+"""
+import json
+report = json.loads(run_tests(code=solution, test_list=["assert add(2, 3) == 5"]))
+print(report)
+if report["success"]:
+    final_answer(solution)
 ```
 <end_code>
 Observation:
 [OK] Executed successfully.
 --- stdout ---
-5
-Thought: The output is correct, so I'll submit the function source.
-```python
-final_answer("def add(a, b):\\n    return a + b")
-```
-<end_code>
-"""
+{'success': True, 'message': 'passed', 'output': ''}
+'''
 
 
 class MBPPProfile(TaskProfile):
@@ -33,10 +34,20 @@ class MBPPProfile(TaskProfile):
             str: タスクの指示
         """
         return (
-            "This is an MBPP task: implement a single Python function that satisfies the "
-            "behavior described in the next user message. Write the function, test it by "
-            "calling it inside print(...), and iterate until it is correct. "
-            "Then submit the function's source code with final_answer."
+            "This is an MBPP task: implement ONE Python function with the exact name and signature "
+            "given by the task's function signature.\n"
+            "- Build the full source as a string in a variable (triple-quoted), then verify it with "
+            "run_tests(code=..., test_list=[...]) using the asserts from the task message.\n"
+            "- As soon as run_tests reports success, call final_answer(<that same string>) in the "
+            "SAME code block. Do not spend another turn.\n"
+            "- The submitted string must contain ONLY imports plus the function (and any helper "
+            "functions it needs). No prints, no asserts, no example calls: the grader appends its "
+            "own test lines to your code and runs the file, so any extra statement that raises "
+            "makes the whole submission fail.\n"
+            "- HIDDEN TESTS: you are shown only part of the test suite. Write a general, correct "
+            "implementation that handles edge cases; never hardcode the shown expected values.\n"
+            "- If run_tests fails, read its output, fix the implementation and try again. "
+            "Keep each turn small: iterations, tokens and time are strictly limited."
         )
 
     def final_answer_specification(self) -> str:
@@ -46,8 +57,9 @@ class MBPPProfile(TaskProfile):
             str: 最終的な回答の仕様
         """
         return (
-            "Pass the full source code of your solution function to final_answer as a string, "
-            'e.g. final_answer("def solve(n):\\n    return n * 2").'
+            "Pass the function's full source code as a string, e.g. final_answer(solution) where "
+            'solution = """def solve(n):\n    return n * 2\n""". '
+            "Never pass a computed value, a function object, or markdown fences."
         )
 
     def few_shot_example(self) -> str:

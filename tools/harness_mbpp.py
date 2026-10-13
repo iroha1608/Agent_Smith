@@ -1,14 +1,18 @@
 """MBPP診断ハーネス(test/mbpp-tuning ブランチ・ローカル専用・push禁止).
 
-MBPPタスクを実LLMで解かせ moulinette で検証、evaluations/<ts>/<task_id>/ に成果物を保存する。
-再実行: uv run python3 tools/harness_mbpp.py --count 12 --seed 1 --providers_file tools/providers_qwen.json
+MBPPタスクを実LLMで解かせ moulinette で検証し、evaluations/<ts>/<task_id>/ に成果物を保存する。
+再実行:
+    uv run python3 tools/harness_mbpp.py --count 50 --seed 1 \
+        --providers_file tools/providers_mbpp.json --workers 3
 """
 from __future__ import annotations
 
 import json
 import subprocess
 import sys
-from dataclasses import dataclass
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -16,87 +20,168 @@ import fire
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_MOULINETTE = REPO_ROOT.parent / "moulinette" / ".venv" / "bin" / "moulinette_eval"
+_DEFAULT_MOULINETTE_PATH = str(DEFAULT_MOULINETTE)
 AGENT_HARD_TIMEOUT_SEC = 180
+# groq無料枠はモデル毎に 8000 tokens/min。連続実行で枠を自分で枯らさないよう、
+# 直近60秒に投入したトークン量を見て次のタスク開始を待つ(ハーネス側のペーシング)。
+TOKENS_PER_TASK_ESTIMATE = 2500
 
 
 @dataclass
 class TaskResult:
+    """1タスク分のハーネス結果."""
+
     task_id: str
-    crashed: bool
-    passed: bool
-    detail: str
+    crashed: bool = False
+    passed: bool = False
+    detail: str = ""
+    iterations: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    error: str | None = None
+    models: list[str] = field(default_factory=list)
 
 
 def _run(cmd: list[str], timeout: int | None = None) -> subprocess.CompletedProcess[str]:
+    """REPO_ROOT を cwd にコマンドを実行する."""
     return subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)
 
 
 def _select(moulinette: str, count: int, seed: int, run_root: Path) -> list[tuple[str, Path]]:
-    sel: dict[str, Path] = {}
-    off = 0
-    while len(sel) < count and off < count * 50:
-        s = seed + off
-        off += 1
-        tmp = run_root / f"_seed{s}.json"
-        c = _run([moulinette, "dump", "mbpp", "--seed", str(s), "--output", str(tmp)])
-        if c.returncode != 0 or not tmp.exists():
+    """moulinette dump を連番seedで回し、重複しないcount個のタスクを選ぶ."""
+    selected: dict[str, Path] = {}
+    offset = 0
+    while len(selected) < count and offset < count * 50:
+        current = seed + offset
+        offset += 1
+        tmp = run_root / f"_seed{current}.json"
+        completed = _run([moulinette, "dump", "mbpp", "--seed", str(current), "--output", str(tmp)])
+        if completed.returncode != 0 or not tmp.exists():
             continue
-        tid = str(json.loads(tmp.read_text())["task_id"])
-        if tid in sel:
+        task_id = str(json.loads(tmp.read_text())["task_id"])
+        if task_id in selected:
             tmp.unlink(missing_ok=True)
             continue
-        td = run_root / tid
-        td.mkdir(parents=True, exist_ok=True)
-        tp = td / "task.json"
-        tmp.rename(tp)
-        sel[tid] = tp
-    if len(sel) < count:
-        raise SystemExit(f"only {len(sel)}/{count} tasks")
-    return list(sel.items())
+        task_dir = run_root / task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        task_path = task_dir / "task.json"
+        tmp.rename(task_path)
+        selected[task_id] = task_path
+    if len(selected) < count:
+        raise SystemExit(f"only {len(selected)}/{count} tasks selected")
+    return list(selected.items())
 
 
-def _solve(moulinette: str, tid: str, tp: Path, providers_file: str | None) -> TaskResult:
-    td = tp.parent
-    sp = td / "solution.json"
-    cmd = [sys.executable, "-m", "agent_mbpp", "--task-file", str(tp), "--output", str(sp)]
+def _solve(moulinette: str, task_id: str, task_path: Path, providers_file: str | None) -> TaskResult:
+    """1タスクをエージェントに解かせ、moulinetteで検証して結果を返す."""
+    task_dir = task_path.parent
+    solution_path = task_dir / "solution.json"
+    cmd = [sys.executable, "-m", "agent_mbpp", "--task-file", str(task_path), "--output", str(solution_path)]
     if providers_file:
         cmd += ["--providers_file_path", providers_file]
+
     try:
-        a = _run(cmd, timeout=AGENT_HARD_TIMEOUT_SEC)
+        agent = _run(cmd, timeout=AGENT_HARD_TIMEOUT_SEC)
     except subprocess.TimeoutExpired:
-        (td / "stderr.log").write_text("[harness] timeout\n", encoding="utf-8")
-        return TaskResult(tid, True, False, "agent timeout")
-    (td / "stdout.log").write_text(a.stdout, encoding="utf-8")
-    (td / "stderr.log").write_text(a.stderr, encoding="utf-8")
-    if a.returncode != 0 or not sp.exists():
-        return TaskResult(tid, True, False, f"agent exited {a.returncode} / no solution")
-    v = _run([moulinette, "validate", "mbpp", "--task-file", str(tp), "--solution-file", str(sp)])
-    (td / "validate.log").write_text(v.stdout + "\n[stderr]\n" + v.stderr, encoding="utf-8")
-    return TaskResult(tid, False, v.returncode == 0, "PASSED" if v.returncode == 0 else "validate FAILED")
+        (task_dir / "stderr.log").write_text("[harness] agent timeout\n", encoding="utf-8")
+        return TaskResult(task_id, crashed=True, detail="agent timeout")
+
+    (task_dir / "stdout.log").write_text(agent.stdout, encoding="utf-8")
+    (task_dir / "stderr.log").write_text(agent.stderr, encoding="utf-8")
+    if agent.returncode != 0 or not solution_path.exists():
+        return TaskResult(task_id, crashed=True, detail=f"agent exited {agent.returncode} / no solution")
+
+    solution = json.loads(solution_path.read_text())
+    result = TaskResult(
+        task_id,
+        iterations=solution.get("iterations", 0),
+        input_tokens=solution.get("total_input_tokens", 0),
+        output_tokens=solution.get("total_output_tokens", 0),
+        error=solution.get("error"),
+        models=sorted({step.get("model_name", "") for step in solution.get("steps") or []}),
+    )
+    validate = _run([moulinette, "validate", "mbpp", "--task-file", str(task_path),
+                     "--solution-file", str(solution_path)])
+    (task_dir / "validate.log").write_text(validate.stdout + "\n[stderr]\n" + validate.stderr, encoding="utf-8")
+    result.passed = validate.returncode == 0
+    if result.passed:
+        result.detail = "PASSED"
+    elif "Correctness: FAILED" in validate.stdout:
+        result.detail = "wrong answer"
+    elif "Metrics: INVALID" in validate.stdout:
+        result.detail = "metrics invalid"
+    else:
+        result.detail = "validate FAILED"
+    return result
 
 
-def main(count: int = 5, seed: int = 1, eval_type: str = "mbpp",
-         providers_file: str | None = None, moulinette: str = str(DEFAULT_MOULINETTE)) -> None:
+def main(count: int = 5, seed: int = 1, eval_type: str = "mbpp", providers_file: str | None = None,
+         workers: int = 1, tpm_budget: int = 7000,
+         moulinette: str = _DEFAULT_MOULINETTE_PATH) -> None:
+    """ハーネスを実行し、PASS数と失敗の内訳を表示する.
+
+    Args:
+        count (int): 解かせるタスク数。
+        seed (int): タスク選択の連番seed開始値。
+        eval_type (str): 保存先 evaluations/<eval_type>/。
+        providers_file (str | None): agentに渡す providers 設定ファイル。
+        workers (int): 並列実行数。レート制限が出るなら 1 に落とす。
+        tpm_budget (int): 直近60秒に投入してよいトークン数の上限(0で無効)。
+        moulinette (str): moulinette_eval 実行ファイルのパス。
+    """
     if not Path(moulinette).exists():
-        raise SystemExit(f"no moulinette: {moulinette}")
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    run_root = REPO_ROOT / "evaluations" / eval_type / ts
+        raise SystemExit(f"moulinette_eval not found: {moulinette}")
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    run_root = REPO_ROOT / "evaluations" / eval_type / timestamp
     run_root.mkdir(parents=True, exist_ok=True)
-    print(f"[harness] providers={providers_file or 'default'} run={run_root}")
+    print(f"[harness] providers={providers_file or 'default'} workers={workers} run={run_root}", flush=True)
+
     tasks = _select(moulinette, count, seed, run_root)
-    print(f"[harness] selected: {[t for t, _ in tasks]}", flush=True)
-    results = []
-    for tid, tp in tasks:
-        r = _solve(moulinette, tid, tp, providers_file)
-        print(f"  {tid:>6}: {'PASS' if r.passed else ('CRASH' if r.crashed else 'FAIL'):5} ({r.detail})", flush=True)
-        results.append(r)
+    print(f"[harness] selected {len(tasks)} tasks", flush=True)
+
+    spent: list[tuple[float, int]] = []
+
+    def pace() -> None:
+        """直近60秒のトークン投入量がTPM予算に収まるまで待つ."""
+        if tpm_budget <= 0:
+            return
+        while True:
+            now = time.monotonic()
+            recent = sum(tokens for stamp, tokens in spent if now - stamp < 60.0)
+            if recent + TOKENS_PER_TASK_ESTIMATE <= tpm_budget or not spent:
+                return
+            time.sleep(3.0)
+
+    results: list[TaskResult] = []
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = []
+        for task_id, path in tasks:
+            pace()
+            futures.append(pool.submit(_solve, moulinette, task_id, path, providers_file))
+            if workers == 1:
+                result = futures[-1].result()
+                spent.append((time.monotonic(), result.input_tokens + result.output_tokens))
+        for future in futures:
+            result = future.result()
+            mark = "PASS" if result.passed else ("CRASH" if result.crashed else "FAIL")
+            print(f"  {result.task_id:>6}: {mark:5} iter={result.iterations} "
+                  f"in={result.input_tokens} out={result.output_tokens} "
+                  f"err={result.error} ({result.detail})", flush=True)
+            results.append(result)
+
     passed = sum(1 for r in results if r.passed)
-    summary = {"timestamp": ts, "providers_file": providers_file, "count": count, "seed": seed,
-               "passed": passed, "results": [r.__dict__ for r in results]}
+    summary = {"timestamp": timestamp, "providers_file": providers_file, "count": count, "seed": seed,
+               "workers": workers, "passed": passed, "results": [r.__dict__ for r in results]}
     (run_root / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-    (REPO_ROOT / "tools" / "results" / f"{ts}.json").write_text(
+    (REPO_ROOT / "tools" / "results" / f"{timestamp}.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"[harness] {passed}/{count} passed  (summary copied to tools/results/{ts}.json)")
+
+    buckets: dict[str, int] = {}
+    for result in results:
+        if not result.passed:
+            buckets[result.detail] = buckets.get(result.detail, 0) + 1
+    print(f"\n[harness] {passed}/{len(results)} passed  failures={buckets}")
+    print(f"[harness] summary: tools/results/{timestamp}.json")
 
 
 if __name__ == "__main__":

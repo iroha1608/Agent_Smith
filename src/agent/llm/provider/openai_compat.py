@@ -54,16 +54,23 @@ class OpenAICompatProvider(LLMProvider):
         """
         try:
             data: dict[str, Any] = json.loads(body)
-            text = data["choices"][0]["message"]["content"]
+            message: dict[str, Any] = data["choices"][0]["message"]
+            text = message.get("content")
         except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
             raise LLMError(f"Failed to parse response: {e}: {body[:500]}") from e
 
-        # 推論 / ツール志向モデルは content を null にして本文を reasoning / tool_calls に置くことがある。
-        # text は str 前提なので、None は LLMError に正規化して上位(ResilientLLMClient)で握らせる。
-        if not isinstance(text, str):
+        # 推論志向モデル(gpt-oss / nemotron 等)は本文をreasoningチャンネルに置き、
+        # contentを空 / nullにして返すことがある。その場合はreasoningを本文として扱い、
+        # 抽出層に渡す(捨てると毎回NO_CODEになり反復だけが消費される)。
+        if not (isinstance(text, str) and text.strip()):
+            reasoning = message.get("reasoning")
+            if isinstance(reasoning, str) and reasoning.strip():
+                text = reasoning
+
+        # それでも本文が無ければ解釈不能。LLMErrorに正規化して上位(ResilientLLMClient)に握らせる。
+        if not isinstance(text, str) or not text.strip():
             raise LLMError(
-                f"non-string content ({type(text).__name__}) "
-                f"from provider={self.config.name} model={self.model}: {body[:300]}"
+                f"empty content from provider={self.config.name} model={self.model}: {body[:300]}"
             )
 
         input_tokens, output_tokens = extract_token_usage(data, text)

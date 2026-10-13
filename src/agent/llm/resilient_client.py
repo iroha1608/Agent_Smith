@@ -45,6 +45,11 @@ _LOGGER = logging.getLogger("agent.llm")
 # 既定はOpenAICompatProvider
 ProviderFactory = Callable[[ProviderConfig, HttpTransport, str, str], LLMProvider]
 
+# 全プロバイダ / 全キー / 全モデルを巡る「周回」の最大数。
+# 1周目は待たずに全組合せを試し、全滅かつ全てレート制限だった場合のみ、
+# 残り時間に収まる待機を1度だけ入れて2周目を試す(待てば解ける429だけを救う)。
+_MAX_SWEEPS = 2
+
 
 class AllProvidersExhausted(LLMError):
     """全プロバイダ・全キーを試しても成功しなかったことを表す例外クラス.
@@ -52,10 +57,13 @@ class AllProvidersExhausted(LLMError):
     Attributes:
         attempts (int): 試行回数。成功までのリトライを含む。
             上位のOrchestratorはこの例外を捕まえて、total_requestsに加算する。
+        retry_after (float | None): レート制限が解除されるまでの最短待機秒数の推定。
+            Noneは「レート制限以外の理由で全滅した(待っても無駄)」を意味する。
     """
-    def __init__(self, message: str, attempts: int = 0) -> None:
-        super().__init__(message, attempts)
+    def __init__(self, message: str, attempts: int = 0, retry_after: float | None = None) -> None:
+        super().__init__(message, attempts, retry_after)
         self.attempts = attempts
+        self.retry_after = retry_after
 
 
 class ResilientLLMClient:
@@ -115,6 +123,29 @@ class ResilientLLMClient:
 
         return wait
 
+    def _sweep_wait(self, retry_after: float | None) -> float | None:
+        """全組合せ全滅のあと、もう1周するために待つ秒数を返す。待っても無駄ならNone.
+
+        待って解決するのはレート制限(429)だけなので、周回中に429を観測していない
+        (retry_afterがNone)場合は待たない。観測していれば、その最短待機秒数が
+        残り時間に収まるときに限って待つ。収まらない(日次枠切れ等)なら諦める。
+
+        Args:
+            retry_after (float | None): 周回中に観測した最短の待機秒数。Noneなら429なし。
+
+        Returns:
+            float | None: 待機秒数。待つ意味がなければNone。
+        """
+        if retry_after is None:
+            return None
+        if self._time_remaining is None:
+            return retry_after
+        budget = self._time_remaining() - self._retry.safety_margin_seconds
+        # 待っても制限解除が残り時間に収まらないなら、待たずに諦める
+        if budget <= 0 or retry_after > budget:
+            return None
+        return retry_after
+
     def generate(
         self,
         messages: list[dict[str, str]],
@@ -122,6 +153,9 @@ class ResilientLLMClient:
         max_tokens: int
     ) -> LLMResponse:
         """粘り付きで1回の生成を行い、成功したLLMResponseを返す.
+
+        まず全プロバイダ / 全キー / 全モデルを待たずに1周する。全滅かつ原因が
+        「残り時間内に解除されるレート制限」のときだけ、その秒数を待ってもう1周する。
 
         Args:
             messages (list[dict[str, str]]): LLMに送信するメッセージ。OpenAI互換の形式で、roleとcontentを持つ辞書のリスト。
@@ -132,11 +166,61 @@ class ResilientLLMClient:
             LLMResponse: 生成テキストと使用量、計測値をまとめた結果。
 
         Raises:
-            AllProvidersExhausted: すべてのプロバイダ / すべてのキーを試しても成功しなかった場合に発生する例外。
+            AllProvidersExhausted: すべてのプロバイダ / キー / モデルを試しても成功しなかった場合。
             BadRequestError: リクエスト不正。上位のOrchestratorはこの例外を捕まえて、success=Falseで返す。
         """
         attempts = 0
         last_error: BaseException | None = None
+
+        for sweep in range(_MAX_SWEEPS):
+            try:
+                return self._sweep(messages, stop_sequences, max_tokens, attempts)
+            except AllProvidersExhausted as exhausted:
+                attempts = exhausted.attempts
+                last_error = exhausted.__cause__ or exhausted
+                wait = self._sweep_wait(exhausted.retry_after)
+                if sweep + 1 >= _MAX_SWEEPS or wait is None:
+                    break
+                self._log.warning(
+                    "all providers/keys/models exhausted after %d attempt(s); "
+                    "waiting %.1fs for the rate limit to clear, then retrying once",
+                    attempts,
+                    wait
+                )
+                self._sleep(wait)
+
+        raise AllProvidersExhausted(
+            f"All providers/keys/models exhausted after {attempts} attempt(s).",
+            attempts=attempts
+        ) from last_error
+
+    def _sweep(
+        self,
+        messages: list[dict[str, str]],
+        stop_sequences: list[str],
+        max_tokens: int,
+        attempts_so_far: int
+    ) -> LLMResponse:
+        """全プロバイダ / 全キー / 全モデルを優先度順に1周だけ試す.
+
+        Args:
+            messages (list[dict[str, str]]): LLMに送信するメッセージ。
+            stop_sequences (list[str]): 生成を停止する文字列郡。
+            max_tokens (int): 生成する最大トークン数。
+            attempts_so_far (int): 前の周回までに送信した回数(通算の試行回数を引き継ぐ)。
+
+        Returns:
+            LLMResponse: 生成テキストと使用量、計測値をまとめた結果。
+
+        Raises:
+            AllProvidersExhausted: この周回で全組合せが失敗した場合。
+            BadRequestError: リクエスト不正。
+        """
+        attempts = attempts_so_far
+        last_error: BaseException | None = None
+        # 周回中に観測した429の待機秒数。retry_afterが無い429は上限秒で代用し、
+        # 最短のものを「待てば解けるかもしれない秒数」として上位へ返す。
+        rate_limit_waits: list[float] = []
 
         for config in self._providers:
             # config.keys_envからAPIキーを取得する。もしkeysが空なら、次のプロバイダへ。
@@ -165,6 +249,10 @@ class ResilientLLMClient:
                         # 1. RateLimitErrorは次のキーへ。バックオフはしない。
                         except RateLimitError as error:
                             last_error = error
+                            rate_limit_waits.append(
+                                error.retry_after if error.retry_after is not None
+                                else self._retry.backoff_max_seconds
+                            )
                             self._log.warning(
                                 "provider=%s key#%d attempts=%d rate limited (retry_after=%s); advance, no backoff.",
                                 config.name,
@@ -259,10 +347,10 @@ class ResilientLLMClient:
                             )
                             return response
 
-        # すべてのプロバイダ / すべてのキーを試しても成功しなかった場合は、AllProvidersExhaustedを送出
-        # 上位のOrchestratorはこの例外を捕まえて、success=Falseで返す。
-        # attemptsはリトライを含む総試行回数
+        # この周回で全組合せが失敗した。429を観測していればその最短待機秒数を添えて送出し、
+        # generate()が「待てば解けるか」を判断する。attemptsはリトライを含む総試行回数。
         raise AllProvidersExhausted(
             f"All providers/keys exhausted after {attempts} attempt(s).",
-            attempts=attempts
+            attempts=attempts,
+            retry_after=min(rate_limit_waits) if rate_limit_waits else None
         ) from last_error

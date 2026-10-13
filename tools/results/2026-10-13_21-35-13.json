@@ -1,0 +1,143 @@
+{
+  "timestamp": "2026-10-13_21-35-13",
+  "providers_file": "tools/providers_mbpp.json",
+  "count": 10,
+  "seed": 1,
+  "workers": 1,
+  "passed": 10,
+  "results": [
+    {
+      "task_id": "127",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 992,
+      "output_tokens": 234,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "80",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 992,
+      "output_tokens": 136,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "252",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 3,
+      "input_tokens": 4062,
+      "output_tokens": 1198,
+      "error": null,
+      "models": [
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "251",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1021,
+      "output_tokens": 154,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "264",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 2,
+      "input_tokens": 2577,
+      "output_tokens": 1431,
+      "error": null,
+      "models": [
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "94",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1043,
+      "output_tokens": 164,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "305",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1011,
+      "output_tokens": 310,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "247",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 3,
+      "input_tokens": 4485,
+      "output_tokens": 1224,
+      "error": null,
+      "models": [
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "457",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1016,
+      "output_tokens": 133,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "65",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1021,
+      "output_tokens": 192,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    }
+  ]
+}
