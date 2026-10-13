@@ -54,9 +54,17 @@ class OpenAICompatProvider(LLMProvider):
         """
         try:
             data: dict[str, Any] = json.loads(body)
-            text: str = data["choices"][0]["message"]["content"]
+            text = data["choices"][0]["message"]["content"]
         except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
             raise LLMError(f"Failed to parse response: {e}: {body[:500]}") from e
+
+        # 推論 / ツール志向モデルは content を null にして本文を reasoning / tool_calls に置くことがある。
+        # text は str 前提なので、None は LLMError に正規化して上位(ResilientLLMClient)で握らせる。
+        if not isinstance(text, str):
+            raise LLMError(
+                f"non-string content ({type(text).__name__}) "
+                f"from provider={self.config.name} model={self.model}: {body[:300]}"
+            )
 
         input_tokens, output_tokens = extract_token_usage(data, text)
         return LLMResponse(

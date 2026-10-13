@@ -233,6 +233,19 @@ class ResilientLLMClient:
                             )
                             break
 
+                        # 6. その他の想定外LLM層失敗(JSONパース失敗 / content=null 等)。
+                        #    クラッシュさせず、この組合せを飛ばして次へ(全滅ならAllProvidersExhausted)。
+                        except LLMError as error:
+                            last_error = error
+                            self._log.warning(
+                                "provider=%s key#%d attempts=%d unexpected LLM error; advance: %s",
+                                config.name,
+                                key_number,
+                                attempts,
+                                error
+                            )
+                            break
+
                         # エラーが発生しなければ、成功。LLMResponseを返す。
                         else:
                             if attempts > 1:

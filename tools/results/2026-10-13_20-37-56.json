@@ -1,0 +1,81 @@
+{
+  "timestamp": "2026-10-13_20-37-56",
+  "providers_file": "tools/providers_qwen.json",
+  "count": 12,
+  "seed": 1,
+  "passed": 4,
+  "results": [
+    {
+      "task_id": "127",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED"
+    },
+    {
+      "task_id": "80",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED"
+    },
+    {
+      "task_id": "252",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED"
+    },
+    {
+      "task_id": "251",
+      "crashed": false,
+      "passed": false,
+      "detail": "validate FAILED"
+    },
+    {
+      "task_id": "264",
+      "crashed": false,
+      "passed": false,
+      "detail": "validate FAILED"
+    },
+    {
+      "task_id": "94",
+      "crashed": false,
+      "passed": false,
+      "detail": "validate FAILED"
+    },
+    {
+      "task_id": "305",
+      "crashed": false,
+      "passed": false,
+      "detail": "validate FAILED"
+    },
+    {
+      "task_id": "247",
+      "crashed": false,
+      "passed": false,
+      "detail": "validate FAILED"
+    },
+    {
+      "task_id": "457",
+      "crashed": false,
+      "passed": false,
+      "detail": "validate FAILED"
+    },
+    {
+      "task_id": "65",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED"
+    },
+    {
+      "task_id": "451",
+      "crashed": false,
+      "passed": false,
+      "detail": "validate FAILED"
+    },
+    {
+      "task_id": "462",
+      "crashed": false,
+      "passed": false,
+      "detail": "validate FAILED"
+    }
+  ]
+}

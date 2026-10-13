@@ -91,7 +91,7 @@ class Orchestrator:
             )
             try:
                 response: LLMResponse = self.provider.generate(
-                    messages=messages,
+                    messages=self._window_messages(messages),
                     stop_sequences=self.stop_sequences,
                     max_tokens=max_tokens
                 )
@@ -156,6 +156,38 @@ class Orchestrator:
                     system_prompt=system_prompt,
                     error=None
                 )
+
+    # 送信履歴の窓(直近N往復)と1メッセージの最大文字数。累積入力トークンを抑えるための切り詰め設定。
+    _HISTORY_WINDOW = 3
+    _OBS_MAX_CHARS = 1200
+
+    @staticmethod
+    def _window_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+        """LLMへ毎回再送する履歴を切り詰めて返す(累積入力トークン対策).
+
+        Chat Completions はステートレスで毎回全履歴を送るため、反復が増えると累積入力が
+        ハード上限(max_input_tokens)を食い潰す。system と最初のタスク文は常に残し、
+        それ以降は直近 _HISTORY_WINDOW 往復(assistant+user)だけを再送する。
+        長い Observation(role=user)は _OBS_MAX_CHARS で切り詰める(assistantのコードは保持)。
+
+        Args:
+            messages (list[dict[str, str]]): [system, user(task), (assistant, user)...] の全履歴。
+
+        Returns:
+            list[dict[str, str]]: 切り詰めた送信用メッセージ列。
+        """
+        head = messages[:2]
+        tail = messages[2:]
+        if len(tail) > Orchestrator._HISTORY_WINDOW * 2:
+            tail = tail[-Orchestrator._HISTORY_WINDOW * 2:]
+
+        trimmed: list[dict[str, str]] = []
+        for message in tail:
+            content = message["content"]
+            if message["role"] == "user" and len(content) > Orchestrator._OBS_MAX_CHARS:
+                content = content[:Orchestrator._OBS_MAX_CHARS] + "\n...[truncated]"
+            trimmed.append({"role": message["role"], "content": content})
+        return head + trimmed
 
     def _build_step(
         self,
