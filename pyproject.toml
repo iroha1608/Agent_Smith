@@ -18,6 +18,24 @@ dependencies = [
 	"python-dotenv>=1.2.4",
 	"requests",
 ]
+
+# 課題 V.2.1 の `uv run sandbox` / `uv run sandbox <config.json>` /
+# `--mcp-stdio "python mcp_tools_mbpp.py"` / `--mcp-server <URL>` を成立させるエントリポイント。
+# 実装は src/sandbox/sandbox_main.py の main()(REPL / -c / -f を持つ)。
+# uvはパッケージ化されていないプロジェクトのscriptsを無視するため、package=trueが必要。
+[project.scripts]
+sandbox = "src.sandbox.sandbox_main:main"
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
 # 実行ロジックに違いはないが、開発、テスト、静的解析に必要。
 [dependency-groups]
 dev = [

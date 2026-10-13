@@ -231,7 +231,35 @@ class Sandbox:
         for name in sorted(self.tools):
             lines.append(self._tool_doc(name, self.tools[name]))
             lines.append("")
+        lines.extend(self._catalog_doc())
         return "\n".join(lines)
+
+    def _catalog_doc(self) -> list[str]:
+        """List the connected server's resources and prompts for the manual.
+
+        The task requires tools, resources and prompts to be exposed, so the
+        manual names whatever the connected server advertises. A server that
+        offers none, or one that fails the query, simply contributes nothing.
+        """
+        if self.client is None:
+            return []
+        lines: list[str] = []
+        for heading, fetch in (("Resources", self.client.list_resources),
+                               ("Prompts", self.client.list_prompts)):
+            try:
+                entries = fetch() or []
+            except Exception:
+                continue
+            if not entries:
+                continue
+            lines.append(f"## {heading}")
+            lines.append("")
+            for entry in entries:
+                name = getattr(entry, "name", None) or getattr(entry, "uri", "") or str(entry)
+                description = (getattr(entry, "description", "") or "").strip()
+                lines.append(f"- {name}: {description}" if description else f"- {name}")
+            lines.append("")
+        return lines
 
     def _dispatch(self, message: dict[str, Any]) -> None:
         """Run one tool in the parent and send the reply back."""
