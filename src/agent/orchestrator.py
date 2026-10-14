@@ -15,7 +15,13 @@ from src.agent.extractor.code_extractor import CodeExtractor
 from src.agent.limits import LimitTracker, StopReason
 from src.agent.llm.provider.provider import LLMGenerator, LLMResponse, LLMError
 from src.agent.extractor.python_extractor import salvage_kind, strip_stop_sequences
-from src.agent.observation import budget_note, build_observation, malformed_code_note, observation_no_code
+from src.agent.observation import (
+    budget_note,
+    build_observation,
+    malformed_code_note,
+    observation_no_code,
+    repeated_code_note,
+)
 from src.agent.llm.transport.transport import TransportError
 from src.agent.prompt.task_profile.task_profile import TaskProfile
 from src.agent.prompt.template import build_system_prompt
@@ -86,6 +92,10 @@ class Orchestrator:
         tracker = LimitTracker(self.limits)
         steps: list[StepMetrics] = []
         best_solution: str = ""
+        # 実行したコード(空白を正規化) -> 最初に実行したstep番号。同じコードの再実行を指摘する。
+        executed_codes: dict[str, int] = {}
+        # 提出に至らなかった反復の連続数。停滞したら別プロバイダのモデルへ切り替える。
+        misses_in_a_row = 0
 
         # ループ本体
         while True:
@@ -187,11 +197,21 @@ class Orchestrator:
                 steps.append(
                     self._build_step(len(steps) + 1, response, "", observation)
                 )
+                misses_in_a_row += 1
+                if misses_in_a_row >= self._ROTATE_AFTER_MISSES:
+                    self._rotate_provider()
+                    misses_in_a_row = 0
                 continue
 
             # コードが抽出できた場合は、サンドボックスで実行し、Observationを生成する
             result: ExecuteResult = self.sandbox.run(code)
             observation = build_observation(result)
+            # 以前と全く同じコードなら、そのことを明示する(同じ誤答の再提出で反復を溶かすのを防ぐ)
+            fingerprint = " ".join(code.split())
+            if fingerprint in executed_codes:
+                observation = f"{repeated_code_note(executed_codes[fingerprint])}\n{observation}"
+            else:
+                executed_codes[fingerprint] = len(steps) + 1
             # 閉じフェンスが欠けたブロックを救済実行した場合は、その事実をLLMに明示する
             salvaged = salvage_kind(cleaned_code)
             if salvaged is not None:
@@ -230,6 +250,12 @@ class Orchestrator:
                 self._build_step(len(steps) + 1, response, code, observation)
             )
 
+            # 提出に至らない反復が続いたら、次から別プロバイダのモデルを優先させる
+            misses_in_a_row = 0 if submission is not None else misses_in_a_row + 1
+            if misses_in_a_row >= self._ROTATE_AFTER_MISSES:
+                self._rotate_provider()
+                misses_in_a_row = 0
+
             # 検査を通った提出があれば、成功としてSolutionOutputを返す
             if submission is not None:
                 return self._build_solution(
@@ -242,6 +268,18 @@ class Orchestrator:
                     system_prompt=system_prompt,
                     error=None
                 )
+
+    # 提出に至らない反復がこの回数続いたら、別プロバイダのモデルへ切り替える
+    _ROTATE_AFTER_MISSES = 2
+
+    def _rotate_provider(self) -> None:
+        """LLMクライアントが切り替えに対応していれば、別プロバイダのモデルを優先させる.
+
+        単一プロバイダのLLMProviderやテスト用のスタブは切り替えを持たないので何もしない。
+        """
+        rotate = getattr(self.provider, "rotate", None)
+        if callable(rotate):
+            rotate()
 
     # 送信履歴の窓(直近N往復)と1メッセージの最大文字数。累積入力トークンを抑えるための切り詰め設定。
     _HISTORY_WINDOW = 2

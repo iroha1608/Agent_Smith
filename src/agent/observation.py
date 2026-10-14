@@ -193,3 +193,21 @@ def malformed_code_note(kind: str) -> str:
         str: Observationの先頭に付ける説明文。未知の種類なら空文字。
     """
     return _MALFORMED_NOTES.get(kind, "")
+
+
+def repeated_code_note(first_step: int) -> str:
+    """以前と同一のコードを実行したことをLLMへ伝える一文を返す.
+
+    実測(codestral, MBPP 160/235): 失敗したコードを一字一句同じまま3〜4回再提出し、
+    同じ失敗で予算を使い切った。同じ入力は同じ結果になるので、明示して考え直させる。
+
+    Args:
+        first_step (int): 同じコードを最初に実行したstep番号。
+
+    Returns:
+        str: Observationの先頭に付ける説明文。
+    """
+    return (
+        f"[REPEATED] This code is identical to what you ran in step {first_step}, so it fails the "
+        "same way. Do not resubmit it: re-read the failing values and change the logic."
+    )

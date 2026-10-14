@@ -339,3 +339,52 @@ def test_total_requests_includes_failed_attempts() -> None:
     assert solution.iterations == 2
     assert solution.steps[1].sandbox_output.startswith("[LLM_UNAVAILABLE]")
     assert solution.total_requests == 1 + 3  # step1の1試行 + 全滅時の3試行
+
+
+class _RotatingStub(StubProvider):
+    """rotate()の呼び出し回数を記録するスタブ."""
+
+    def __init__(self, responses: list[str]) -> None:
+        super().__init__(responses)
+        self.rotations = 0
+
+    def rotate(self) -> None:
+        self.rotations += 1
+
+
+def test_repeated_code_is_flagged_and_provider_rotates() -> None:
+    """同じコードの再実行は[REPEATED]で指摘し、提出に至らない反復が2回続いたら切り替える."""
+    provider = _RotatingStub([_RESP_PRINT, _RESP_PRINT, _RESP_FINAL])
+    orchestrator = Orchestrator(
+        provider=provider, extractor=PythonCodeExtractor(), sandbox=MockSandbox(),
+        profile=MBPPProfile(), limits=_limits(),
+    )
+    solution = orchestrator.run("1", "mbpp", "task")
+    assert solution.success is True
+    assert "[REPEATED]" not in solution.steps[0].sandbox_output
+    assert solution.steps[1].sandbox_output.startswith("[REPEATED] This code is identical to what you ran in step 1")
+    assert provider.rotations == 1
+
+
+def test_input_guard_shrinks_window_before_giving_up() -> None:
+    """累積入力の残りが少ないときは、履歴の窓を縮めて送り、上限を踏み越えない."""
+    sent_sizes: list[int] = []
+
+    class _Recording(StubProvider):
+        def generate(self, messages: list[dict[str, str]], stop_sequences: list[str], max_tokens: int) -> LLMResponse:
+            sent_sizes.append(len(messages))
+            response = super().generate(messages, stop_sequences, max_tokens)
+            # 送った文字数に見合う入力トークンを報告する(1トークン=4文字)
+            tokens = sum(len(m["content"]) for m in messages) // 4
+            return response.model_copy(update={"input_tokens": tokens})
+
+    long_print = "Thought: t.\n```python\nprint('" + "x" * 3000 + "')\n```"
+    orchestrator = Orchestrator(
+        provider=_Recording([long_print, long_print, long_print, long_print, long_print]),
+        extractor=PythonCodeExtractor(), sandbox=MockSandbox(), profile=MBPPProfile(),
+        limits=_limits(max_input_tokens=6000, max_iterations=10),
+    )
+    solution = orchestrator.run("1", "mbpp", "task")
+    assert solution.total_input_tokens <= 6000
+    assert solution.error == "MAX_INPUT_TOKENS"
+    assert min(sent_sizes) < max(sent_sizes)   # 途中で窓を縮めて送った

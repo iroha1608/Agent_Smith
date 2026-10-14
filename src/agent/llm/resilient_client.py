@@ -126,6 +126,26 @@ class ResilientLLMClient:
         # 時間とトークンを払わないようにする(実測: gemini-3-flash-previewが毎回
         # 思考だけで上限に達して空応答を返し、反復ごとに数秒を失っていた)。
         self._disabled: set[_Combo] = set()
+        # 停滞時に後回しにしたプロバイダ名(古い順)と、直前に成功した組合せ。
+        # 同じモデルが同じ誤答を繰り返すとき、別会社のモデルに視点を変えさせるために使う。
+        self._rotated: list[str] = []
+        self._last_success: _Combo | None = None
+
+    def rotate(self) -> None:
+        """直前に成功したプロバイダを後回しにし、次の生成から別プロバイダのモデルを優先させる.
+
+        Orchestratorが「同じモデルで提出に至らない反復が続いた」と判断したときに呼ぶ。
+        プロバイダ単位で回すのは、同じ会社の別モデルは似た誤り方をしやすいため
+        (実測: codestralが犬の年齢の式を4回当て推量で外し、cohere / gemini / groqは解けた)。
+        全プロバイダを一巡したら、古く後回しにしたものから順に戻ってくる。
+        """
+        if self._last_success is None:
+            return
+        name = self._last_success[0]
+        if name in self._rotated:
+            self._rotated.remove(name)
+        self._rotated.append(name)
+        self._log.info("rotate: provider=%s moved to the back after stagnation", name)
 
     def _request_timeout(self, config: ProviderConfig) -> float | None:
         """このリクエストに許すHTTPタイムアウト秒数を返す。もう送る時間が無ければNone.
@@ -254,13 +274,14 @@ class ResilientLLMClient:
     def _candidates(self) -> list[tuple[ProviderConfig, int, str, str]]:
         """この周回で試す(設定, キー番号, キー, モデル)の組合せを優先度順に返す.
 
-        一過性でない失敗を起こした組合せは後ろへ回す(捨てはしない: 全部がそうなら
-        それでも試すしかないため)。
+        停滞で後回しにしたプロバイダ(rotate)はその後ろ、一過性でない失敗を起こした組合せは
+        最後に回す(捨てはしない: 全部がそうならそれでも試すしかないため)。
 
         Returns:
             list[tuple[ProviderConfig, int, str, str]]: 試す順に並べた組合せ。
         """
         preferred: list[tuple[ProviderConfig, int, str, str]] = []
+        rotated: dict[str, list[tuple[ProviderConfig, int, str, str]]] = {name: [] for name in self._rotated}
         demoted: list[tuple[ProviderConfig, int, str, str]] = []
         for config in self._providers:
             # config.keys_envからAPIキーを取得する。もしkeysが空なら、次のプロバイダへ。
@@ -278,9 +299,12 @@ class ResilientLLMClient:
                     combo = (config, key_number, key, model)
                     if (config.name, key_number, model) in self._disabled:
                         demoted.append(combo)
+                    elif config.name in rotated:
+                        rotated[config.name].append(combo)
                     else:
                         preferred.append(combo)
-        return preferred + demoted
+        ordered_rotated = [combo for name in self._rotated for combo in rotated[name]]
+        return preferred + ordered_rotated + demoted
 
     def _sweep(
         self,
@@ -451,6 +475,7 @@ class ResilientLLMClient:
                     if attempts > 1:
                         response = response.model_copy(update={"retries": attempts - 1})
                     self._disabled.discard(combo_id)
+                    self._last_success = combo_id
                     self._log.info(
                         "provider=%s key#%d model=%s success after %d attempt(s)",
                         config.name,

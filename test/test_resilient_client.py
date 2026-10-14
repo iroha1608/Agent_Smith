@@ -281,3 +281,20 @@ def test_failed_combo_is_demoted_on_next_call(monkeypatch: pytest.MonkeyPatch) -
     second = _gen(client)
     assert second.model_name == "p2/model"
     assert second.retries == 0   # p1を飛ばしてp2が1回目で成功
+
+
+
+def test_rotate_prefers_another_provider_next_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """rotate()後は、直前に成功したプロバイダを後回しにして別プロバイダから試す."""
+    monkeypatch.setenv("P1_KEY", "k1")
+    monkeypatch.setenv("P2_KEY", "k2")
+    providers = [_config("p1", "P1_KEY", 1), _config("p2", "P2_KEY", 2)]
+    scripts: dict[str, list[object]] = {
+        "k1": [_ok_response("p1/model"), _ok_response("p1/model")],
+        "k2": [_ok_response("p2/model")]}
+    client, _ = _client(providers, scripts)
+    assert _gen(client).model_name == "p1/model"
+    client.rotate()
+    assert _gen(client).model_name == "p2/model"
+    client.rotate()   # 一巡したら、古く後回しにしたp1から戻る
+    assert _gen(client).model_name == "p1/model"

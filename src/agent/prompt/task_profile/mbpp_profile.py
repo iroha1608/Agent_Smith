@@ -47,7 +47,10 @@ class MBPPProfile(TaskProfile):
             "- Gate final_answer on the task's own asserts only. Do not add asserts you invented: "
             "if they are wrong they block a correct submission. To explore edge cases, print values.\n"
             "- If run_tests fails, its output names each failing assert and what your function "
-            "actually returned. Compare that with the expected value, fix the rule, retry."
+            "actually returned. Compare that with the expected value, fix the rule, retry.\n"
+            "- When the expected outputs follow a numeric or bit pattern you cannot see at once, "
+            "compute it in code from the given examples (differences, ratios, binary forms) and "
+            "print it, instead of guessing a formula."
         )
 
     def final_answer_specification(self) -> str:

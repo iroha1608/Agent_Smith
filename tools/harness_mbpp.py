@@ -57,6 +57,17 @@ def _select(moulinette: str, count: int, seed: int, run_root: Path,
     (前回落ちたタスクの再測に使う)。
     """
     selected: dict[str, Path] = {}
+    if task_ids:
+        # 指定タスクは dump --task-id で直接取り出す(seedを回して探すと数十回のdumpが要る)
+        for task_id in task_ids:
+            task_dir = run_root / str(task_id)
+            task_dir.mkdir(parents=True, exist_ok=True)
+            task_path = task_dir / "task.json"
+            completed = _run([moulinette, "dump", "mbpp", "--task-id", str(task_id), "--output", str(task_path)])
+            if completed.returncode != 0 or not task_path.exists():
+                raise SystemExit(f"dump failed for task {task_id}: {completed.stderr[-300:]}")
+            selected[str(task_id)] = task_path
+        return list(selected.items())
     wanted = set(task_ids)
     target = len(wanted) if wanted else count
     offset = 0
