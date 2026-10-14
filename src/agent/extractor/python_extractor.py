@@ -9,12 +9,20 @@ from src.agent.extractor.code_extractor import CodeExtractor
 
 # ```python``` Pythonコードブロック
 # [ \t]* ラベルのあとの空白、タブを許可
-# \r?\n コードブロックあとの改行を許可
+# \r?\n コードブロックあとの改行を許可(ここが開始フェンスと地の文の境目)
 # (.*?) コード本体。re.DOTALLで改行を含む任意の文字列を許可
-# \r?\n? コードブロックの終わりの直前に改行を許可
+# \r?\n[ \t]*``` 閉じフェンスは行頭(直前が改行)に限る
+#
+# 開始フェンスに行頭アンカー(^[ \t]*)は付けない。実測(MBPPタスク251/395/108)でモデルが
+# `Thought: ...すること。```python\n` のようにThoughtと同じ行にフェンスを書き、行頭アンカーの
+# せいで厳格パターンが0件マッチ -> 未閉鎖フェンス救済に落ちて末尾の``` まで取り込み構文エラー、
+# さらに「出力上限で切られた」という誤った原因をLLMへ伝えていた。
+# 行中のフェンス(例: "見て ```python x``` ね")はラベル直後に改行が無いので依然マッチしない。
 _PYTHON_CODE_BLOCK_PATTERN = re.compile(
-    r"^[ \t]*```[ \t]*(?:python|py)[ \t]*\r?\n(.*?)\r?\n[ \t]*```[ \t]*$", re.DOTALL | re.MULTILINE | re.IGNORECASE
+    r"```[ \t]*(?:python|py)[ \t]*\r?\n(.*?)\r?\n[ \t]*```[ \t]*$", re.DOTALL | re.MULTILINE | re.IGNORECASE
 )
+# 未閉鎖ブロックの救済で本体末尾に閉じフェンスが残っていたら落とす(保険)。
+_TRAILING_FENCE_PATTERN = re.compile(r"\r?\n[ \t]*```[ \t]*\Z")
 
 # 閉じフェンスが無いブロックの救済用。出力トークン上限で応答が途中で切れると
 # ```python のあとが閉じられずに終わる。捨てると1反復が丸ごと無駄になるので、
@@ -99,7 +107,8 @@ def _extract_with_kind(llm_output: str) -> tuple[str | None, str | None]:
     else:
         match = _UNCLOSED_CODE_BLOCK_PATTERN.search(llm_output)
         if match and match.group(1).strip():
-            code = str(match.group(1).rstrip())
+            body = _TRAILING_FENCE_PATTERN.sub("", str(match.group(1)))
+            code = body.rstrip()
             kind = SALVAGE_UNCLOSED_FENCE
         else:
             code = _extract_bare_code(llm_output)

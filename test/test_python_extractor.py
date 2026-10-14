@@ -137,3 +137,23 @@ def test_valid_code_is_left_untouched(extractor: PythonCodeExtractor) -> None:
     text = '```python\nprint("a\\"b")\n```'
     assert extractor.extract(text) == 'print("a\\"b")'
     assert salvage_kind(text) is None
+
+
+def test_opening_fence_on_the_thought_line_is_matched(extractor: PythonCodeExtractor) -> None:
+    """Thoughtと同じ行に開始フェンスを書かれても正規ブロックとして扱う.
+
+    実測(MBPPタスク251/395/108)でモデルが改行を入れずに ```python を書き、行頭アンカーの
+    せいで厳格パターンが0件マッチ -> 未閉鎖救済に落ちて末尾の ``` まで取り込み構文エラー、
+    さらに「出力上限で切られた」という誤った原因をLLMに伝えていた。
+    """
+    text = "Thought: do it.```python\nx = 1\nprint(x)\n```\n"
+    assert extractor.extract(text) == "x = 1\nprint(x)"
+    assert salvage_kind(text) is None          # 救済ではなく正規ブロック扱い
+
+
+def test_unclosed_salvage_drops_a_trailing_fence(extractor: PythonCodeExtractor) -> None:
+    """未閉鎖救済の本体末尾に閉じフェンスが残っていたら落とす(構文エラー防止)."""
+    code = extractor.extract("```python\nprint(1)\n```\ntrailing prose\n```python\nprint(2)\n")
+    assert code is not None
+    compile(code, "<test>", "exec")
+    assert "```" not in code
