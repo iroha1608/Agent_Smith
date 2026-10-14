@@ -14,7 +14,7 @@ from collections.abc import Callable
 from src.agent.extractor.code_extractor import CodeExtractor
 from src.agent.limits import LimitTracker, StopReason
 from src.agent.llm.provider.provider import LLMGenerator, LLMResponse, LLMError
-from src.agent.extractor.python_extractor import salvage_kind
+from src.agent.extractor.python_extractor import salvage_kind, strip_stop_sequences
 from src.agent.observation import budget_note, build_observation, malformed_code_note, observation_no_code
 from src.agent.llm.transport.transport import TransportError
 from src.agent.prompt.task_profile.task_profile import TaskProfile
@@ -59,6 +59,8 @@ class Orchestrator:
         self.limits = limits
         self.stop_sequences = stop_sequence if stop_sequence is not None else list(_DEFAULT_STOP_SEQUENCE)
         self.solution_verifier = solution_verifier
+        # 入力トークン見積もりの係数。実測に合わせて安全側(小さい側)へだけ補正する。
+        self._chars_per_token = self._CHARS_PER_TOKEN
 
     def run(self, task_id: str, benchmark: str, task_message: str) -> SolutionOutput:
         """1タスク分のループを回しSolutionOutputを生成する.
@@ -102,13 +104,12 @@ class Orchestrator:
                 )
 
             # 送る履歴を決め、累積入力トークンの上限を踏み越えないか事前に確かめる。
-            # LimitTrackerの判定は「送信前の実績」しか見ないため、1回の送信で上限を
-            # 飛び越えられる(実測で6885/6000)。踏み越えると即不合格なので、
-            # まず窓を最小化し、それでも収まらないならリクエストせずに打ち切る。
-            windowed = self._window_messages(messages)
-            if tracker.total_input_tokens + self._estimate_tokens(windowed) > self.limits.max_input_tokens:
-                windowed = windowed[:2]
-            if tracker.total_input_tokens + self._estimate_tokens(windowed) > self.limits.max_input_tokens:
+            # 判定に使うのは「これまでの実績(プロバイダ報告値の累計) + 次の1回の見積もり」。
+            # 次の1回の入力トークン数は送る前には分からないため文字数から見積もる。
+            # 踏み越えると即不合格なので、窓を段階的に縮め、それでも収まらないなら
+            # リクエストせずに打ち切る。
+            windowed = self._fit_window(messages, tracker)
+            if windowed is None:
                 return self._build_solution(
                     task_id=task_id,
                     benchmark=benchmark,
@@ -134,6 +135,23 @@ class Orchestrator:
             # AllProvidersExhausted / BadRequestErrorをLLMErrorで一括で補足
             except (LLMError, TransportError) as error:
                 failed_requests = getattr(error, "attempts", 1)
+                # 失敗した試行でもプロバイダ側で消費したトークンは計上し、
+                # 反復数とstepsの数が食い違わないよう、この反復の記録も残す。
+                wasted_input = int(getattr(error, "input_tokens", 0) or 0)
+                wasted_output = int(getattr(error, "output_tokens", 0) or 0)
+                tracker.record_usage(wasted_input, wasted_output)
+                if failed_requests <= 0:
+                    # 残り時間が無く1回も送っていない。LLMを呼んでいないので反復に数えない。
+                    tracker.iterations -= 1
+                else:
+                    steps.append(StepMetrics(
+                        step=len(steps) + 1,
+                        input_tokens=wasted_input,
+                        output_tokens=wasted_output,
+                        request_time_ms=0.0,
+                        sandbox_output=f"[LLM_UNAVAILABLE] {error}"[:500],
+                        retries=failed_requests - 1,
+                    ))
                 return self._build_solution(
                     task_id=task_id,
                     benchmark=benchmark,
@@ -142,19 +160,19 @@ class Orchestrator:
                     tracker=tracker,
                     steps=steps,
                     system_prompt=system_prompt,
-                    error="LLM_UNAVAILABLE",
-                    failed_requests=failed_requests
+                    error="LLM_UNAVAILABLE"
                 )
             tracker.record_usage(
                 response.input_tokens,
                 response.output_tokens,
             )
+            self._learn_chars_per_token(windowed, response)
             messages.append(
                 {"role": "assistant", "content": response.text}
             )
 
-            # レスポンスからコードを抽出する
-            cleaned_code = response.text.replace("<end_code>", "")
+            # レスポンスからコードを抽出する(停止シーケンスの残骸を取り除いてから)
+            cleaned_code = strip_stop_sequences(response.text, self.stop_sequences)
             code = self.extractor.extract(cleaned_code)
 
             # コードが抽出できなかった場合は、Observationを生成して次のループに進む。
@@ -175,7 +193,7 @@ class Orchestrator:
             result: ExecuteResult = self.sandbox.run(code)
             observation = build_observation(result)
             # 閉じフェンスが欠けたブロックを救済実行した場合は、その事実をLLMに明示する
-            salvaged = salvage_kind(response.text)
+            salvaged = salvage_kind(cleaned_code)
             if salvaged is not None:
                 observation = f"{malformed_code_note(salvaged)}\n{observation}"
 
@@ -231,9 +249,12 @@ class Orchestrator:
     # 履歴として再送するassistant発話の上限。自分が書いたコード全文を毎回送り直すと
     # 反復2回目以降の入力が一気に膨らみ、累積入力の上限(6000)を食い潰す。
     _ASSISTANT_MAX_CHARS = 1200
-    # トークン概算の係数(実測: 英文+コードで1トークン≒3.9文字)。
-    # 事前ガードで使うため、安全側に小さめの値で割って多めに見積もる。
-    _CHARS_PER_TOKEN = 3.6
+    # トークン見積もりの係数(1トークンあたりの文字数)の初期値。事前ガードで使うため安全側に
+    # 小さめに取る。実測(2026-10-15・過去runの全ステップを再構成して比較): 中央値は3.7〜4.1だが
+    # qwenは最小3.03・command-aは3.49。旧値3.6では見積もりが甘く、geminiで6309/6000を踏み越えた。
+    _CHARS_PER_TOKEN = 3.0
+    # 実測の比から係数を下げるときの安全率(実測値よりさらに5%小さく見る)
+    _CHARS_PER_TOKEN_SAFETY = 0.95
     # 残り出力トークンが「1反復ぶん × この倍率」以下になったら提出を促す。
     # 1(=残り1反復ぶん)にしているのは、本番設定(総1500 / 1反復600)で2にすると
     # 1反復目の直後(残り1200)から警告が出てしまい、3〜5反復かけて正解に至るタスクを
@@ -261,8 +282,7 @@ class Orchestrator:
             return observation
         return f"{observation}\n{budget_note(remaining)}"
 
-    @classmethod
-    def _estimate_tokens(cls, messages: list[dict[str, str]]) -> int:
+    def _estimate_tokens(self, messages: list[dict[str, str]]) -> int:
         """これから送るメッセージ列の入力トークン数を概算する.
 
         ハード制限(累積入力トークン)を踏み越えないための事前ガードに使う。
@@ -276,7 +296,48 @@ class Orchestrator:
         """
         characters = sum(len(message["content"]) for message in messages)
         # メッセージごとのrole等のオーバーヘッドを4トークンずつ加算する
-        return int(characters / cls._CHARS_PER_TOKEN) + 4 * len(messages)
+        return int(characters / self._chars_per_token) + 1 + 4 * len(messages)
+
+    def _learn_chars_per_token(self, sent: list[dict[str, str]], response: LLMResponse) -> None:
+        """実際に送った文字数と報告された入力トークン数から、見積もり係数を安全側へ補正する.
+
+        トークナイザはモデルごとに違い、固定係数では甘くなることがある。実測の比が
+        今の係数より小さければ(=1トークンが短い)、係数をそこまで下げる。上げはしない。
+        失敗試行のトークンが足されたレスポンス(retries>0)は比が歪むので使わない。
+
+        Args:
+            sent (list[dict[str, str]]): このリクエストで送ったメッセージ列。
+            response (LLMResponse): そのレスポンス。
+        """
+        if response.retries or response.input_tokens <= 0:
+            return
+        characters = sum(len(message["content"]) for message in sent)
+        observed = characters / response.input_tokens * self._CHARS_PER_TOKEN_SAFETY
+        if 0 < observed < self._chars_per_token:
+            self._chars_per_token = observed
+
+    def _fit_window(
+        self, messages: list[dict[str, str]], tracker: LimitTracker
+    ) -> list[dict[str, str]] | None:
+        """累積入力トークンの上限に収まる送信履歴を返す。どう縮めても収まらなければNone.
+
+        直近 _HISTORY_WINDOW 往復 -> 1往復 -> system+タスク文だけ、の順に縮める。
+        いきなり履歴を全部捨てると、直前の失敗とその原因(Observation)をLLMが見られず
+        同じ失敗を繰り返すため、まず1往復だけ残す段階を挟む。
+
+        Args:
+            messages (list[dict[str, str]]): 全履歴。
+            tracker (LimitTracker): 現在の消費状況。
+
+        Returns:
+            list[dict[str, str]] | None: 送信用メッセージ列。収まらなければNone。
+        """
+        budget = self.limits.max_input_tokens - tracker.total_input_tokens
+        for window in range(self._HISTORY_WINDOW, -1, -1):
+            candidate = self._window_messages(messages, window)
+            if self._estimate_tokens(candidate) <= budget:
+                return candidate
+        return None
 
     @staticmethod
     def _sanitize_solution(raw: str) -> str:
@@ -362,7 +423,7 @@ class Orchestrator:
         return None
 
     @staticmethod
-    def _window_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _window_messages(messages: list[dict[str, str]], window: int | None = None) -> list[dict[str, str]]:
         """LLMへ毎回再送する履歴を切り詰めて返す(累積入力トークン対策).
 
         Chat Completions はステートレスで毎回全履歴を送るため、反復が増えると累積入力が
@@ -373,14 +434,15 @@ class Orchestrator:
 
         Args:
             messages (list[dict[str, str]]): [system, user(task), (assistant, user)...] の全履歴。
+            window (int | None): 残す往復数。Noneなら _HISTORY_WINDOW。0ならsystemとタスク文だけ。
 
         Returns:
             list[dict[str, str]]: 切り詰めた送信用メッセージ列。
         """
+        keep = Orchestrator._HISTORY_WINDOW if window is None else window
         head = messages[:2]
         tail = messages[2:]
-        if len(tail) > Orchestrator._HISTORY_WINDOW * 2:
-            tail = tail[-Orchestrator._HISTORY_WINDOW * 2:]
+        tail = tail[-keep * 2:] if keep > 0 else []
 
         limits = {"user": Orchestrator._OBS_MAX_CHARS, "assistant": Orchestrator._ASSISTANT_MAX_CHARS}
         trimmed: list[dict[str, str]] = []

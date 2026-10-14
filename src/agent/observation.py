@@ -7,6 +7,8 @@ from enum import Enum
 
 from src.agent.extractor.python_extractor import (
     SALVAGE_ESCAPED_QUOTES,
+    SALVAGE_JSON_WRAPPED,
+    SALVAGE_MULTIPLE_BLOCKS,
     SALVAGE_UNCLOSED_FENCE,
     SALVAGE_UNFENCED,
 )
@@ -36,7 +38,7 @@ _SUMMARY: dict[Status, str] = {
 _NOTE: dict[Status, str] = {
     Status.EXCEPTION: "Fix the error shown above, then re-run.",
     Status.TIMEOUT: "Add a termination condition and avoid unbounded loops.",
-    Status.TRUNCATED: "Reduce the amount you printi.",
+    Status.TRUNCATED: "Print less: show only the values you need.",
     Status.FINAL_ANSWER_INVALID: "Call final_answer() with the actual solution as its argument.",
     Status.NO_CODE: "Write exactly one ```python ... ``` code block."
 }
@@ -165,6 +167,15 @@ _MALFORMED_NOTES: dict[str, str] = {
         'if report[\\"success\\"]: instead of if report["success"]:). That is a SyntaxError. '
         "I unescaped the broken lines and ran your code. Write plain Python quotes: this is a "
         "code block, not a JSON string."
+    ),
+    SALVAGE_JSON_WRAPPED: (
+        "[MALFORMED_CODE] Your ```python block contained a JSON object like {\"code\": \"...\"} "
+        "instead of Python. I took the string under \"code\" and executed it as Python. Write the "
+        "Python statements directly inside the block."
+    ),
+    SALVAGE_MULTIPLE_BLOCKS: (
+        "[NOTE] Your message had several ```python blocks. I joined them in order and executed "
+        "them as one program. Prefer exactly one block per turn."
     ),
 }
 

@@ -78,6 +78,34 @@ class LLMError(RuntimeError):
     """
 
 
+class EmptyResponseError(LLMError):
+    """HTTPは成功したが本文が空だった(生成はされたが使えない)ことを表す例外クラス.
+
+    推論モデルが思考だけで max_tokens を使い切った場合などに起きる。プロバイダ側では
+    トークンが消費されているため、その使用量を持たせて上位で計上できるようにする
+    (課題 VI.1: 思考トークンも制限に数える。捨てると過少計上になる)。
+
+    Attributes:
+        input_tokens (int): このリクエストで消費した入力トークン数。
+        output_tokens (int): このリクエストで消費した出力トークン数。
+    """
+    def __init__(self, message: str, input_tokens: int = 0, output_tokens: int = 0) -> None:
+        """メッセージと消費トークン数を保持する.
+
+        Args:
+            message (str): エラーメッセージ
+            input_tokens (int): 消費した入力トークン数
+            output_tokens (int): 消費した出力トークン数
+        """
+        super().__init__(message, input_tokens, output_tokens)
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+    def __str__(self) -> str:
+        """メッセージだけを返す(ログを読みやすくするため)."""
+        return str(self.args[0])
+
+
 class LLMHTTPError(LLMError):
     """LLM呼び出し時のHTTPステータス由来の失敗を表す例外クラス.
 

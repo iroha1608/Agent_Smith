@@ -29,6 +29,7 @@ from src.agent.llm.provider.openai_compat import OpenAICompatProvider
 from src.agent.llm.provider.provider import (
     AuthenticationError,
     BadRequestError,
+    EmptyResponseError,
     LLMError,
     LLMProvider,
     LLMResponse,
@@ -59,11 +60,30 @@ class AllProvidersExhausted(LLMError):
             上位のOrchestratorはこの例外を捕まえて、total_requestsに加算する。
         retry_after (float | None): レート制限が解除されるまでの最短待機秒数の推定。
             Noneは「レート制限以外の理由で全滅した(待っても無駄)」を意味する。
+        input_tokens (int): 失敗した試行がプロバイダ側で消費した入力トークンの合計。
+        output_tokens (int): 失敗した試行がプロバイダ側で消費した出力トークンの合計。
     """
-    def __init__(self, message: str, attempts: int = 0, retry_after: float | None = None) -> None:
-        super().__init__(message, attempts, retry_after)
+    def __init__(
+        self,
+        message: str,
+        attempts: int = 0,
+        retry_after: float | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+    ) -> None:
+        super().__init__(message, attempts, retry_after, input_tokens, output_tokens)
         self.attempts = attempts
         self.retry_after = retry_after
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+    def __str__(self) -> str:
+        """メッセージだけを返す(ログを読みやすくするため)."""
+        return str(self.args[0])
+
+
+# 同じタスクの中で、再び試しても無駄な組合せ(プロバイダ名, キー番号, モデル名)を表す型
+_Combo = tuple[str, int, str]
 
 
 class ResilientLLMClient:
@@ -101,6 +121,31 @@ class ResilientLLMClient:
         self._sleep = sleep
         self._time_remaining = time_remaining
         self._log = logger if logger is not None else _LOGGER
+        # 一過性でない失敗(不正リクエスト / 認証 / 空応答など)を起こした組合せ。
+        # 1タスク(=このクライアントの寿命)の間は後回しにし、毎反復で同じ失敗に
+        # 時間とトークンを払わないようにする(実測: gemini-3-flash-previewが毎回
+        # 思考だけで上限に達して空応答を返し、反復ごとに数秒を失っていた)。
+        self._disabled: set[_Combo] = set()
+
+    def _request_timeout(self, config: ProviderConfig) -> float | None:
+        """このリクエストに許すHTTPタイムアウト秒数を返す。もう送る時間が無ければNone.
+
+        プロバイダ設定のタイムアウト(既定60秒)をそのまま使うと、残り時間が少ないときに
+        1リクエストの待ちでタスクの制限時間(MBPP 120秒)を越え、プロセスごと強制終了される。
+        残り時間 - 安全マージン に切り詰める。
+
+        Args:
+            config (ProviderConfig): 送信先プロバイダの設定。
+
+        Returns:
+            float | None: タイムアウト秒数。残り時間が無ければNone。
+        """
+        if self._time_remaining is None:
+            return config.request_timeout_sec
+        budget = self._time_remaining() - self._retry.safety_margin_seconds
+        if budget <= 1.0:
+            return None
+        return min(config.request_timeout_sec, budget)
 
     def _wait_seconds(self, error: BaseException, attempt_on_key: int) -> float | None:
         """次の再送までの待機秒数を返す。残予算がなければNone.
@@ -156,6 +201,8 @@ class ResilientLLMClient:
 
         まず全プロバイダ / 全キー / 全モデルを待たずに1周する。全滅かつ原因が
         「残り時間内に解除されるレート制限」のときだけ、その秒数を待ってもう1周する。
+        成功までに空応答などで消費したトークンは、成功したレスポンスの使用量に足して返す
+        (StepMetricsの合計とSolutionOutputの合計を一致させたまま、過少計上を防ぐ)。
 
         Args:
             messages (list[dict[str, str]]): LLMに送信するメッセージ。OpenAI互換の形式で、roleとcontentを持つ辞書のリスト。
@@ -167,14 +214,15 @@ class ResilientLLMClient:
 
         Raises:
             AllProvidersExhausted: すべてのプロバイダ / キー / モデルを試しても成功しなかった場合。
-            BadRequestError: リクエスト不正。上位のOrchestratorはこの例外を捕まえて、success=Falseで返す。
+                失敗した試行が消費したトークンを input_tokens / output_tokens に持つ。
         """
         attempts = 0
+        wasted = [0, 0]
         last_error: BaseException | None = None
 
         for sweep in range(_MAX_SWEEPS):
             try:
-                return self._sweep(messages, stop_sequences, max_tokens, attempts)
+                response = self._sweep(messages, stop_sequences, max_tokens, attempts, wasted)
             except AllProvidersExhausted as exhausted:
                 attempts = exhausted.attempts
                 last_error = exhausted.__cause__ or exhausted
@@ -188,40 +236,32 @@ class ResilientLLMClient:
                     wait
                 )
                 self._sleep(wait)
+            else:
+                if wasted[0] or wasted[1]:
+                    response = response.model_copy(update={
+                        "input_tokens": response.input_tokens + wasted[0],
+                        "output_tokens": response.output_tokens + wasted[1],
+                    })
+                return response
 
         raise AllProvidersExhausted(
             f"All providers/keys/models exhausted after {attempts} attempt(s).",
-            attempts=attempts
+            attempts=attempts,
+            input_tokens=wasted[0],
+            output_tokens=wasted[1],
         ) from last_error
 
-    def _sweep(
-        self,
-        messages: list[dict[str, str]],
-        stop_sequences: list[str],
-        max_tokens: int,
-        attempts_so_far: int
-    ) -> LLMResponse:
-        """全プロバイダ / 全キー / 全モデルを優先度順に1周だけ試す.
+    def _candidates(self) -> list[tuple[ProviderConfig, int, str, str]]:
+        """この周回で試す(設定, キー番号, キー, モデル)の組合せを優先度順に返す.
 
-        Args:
-            messages (list[dict[str, str]]): LLMに送信するメッセージ。
-            stop_sequences (list[str]): 生成を停止する文字列郡。
-            max_tokens (int): 生成する最大トークン数。
-            attempts_so_far (int): 前の周回までに送信した回数(通算の試行回数を引き継ぐ)。
+        一過性でない失敗を起こした組合せは後ろへ回す(捨てはしない: 全部がそうなら
+        それでも試すしかないため)。
 
         Returns:
-            LLMResponse: 生成テキストと使用量、計測値をまとめた結果。
-
-        Raises:
-            AllProvidersExhausted: この周回で全組合せが失敗した場合。
-            BadRequestError: リクエスト不正。
+            list[tuple[ProviderConfig, int, str, str]]: 試す順に並べた組合せ。
         """
-        attempts = attempts_so_far
-        last_error: BaseException | None = None
-        # 周回中に観測した429の待機秒数。retry_afterが無い429は上限秒で代用し、
-        # 最短のものを「待てば解けるかもしれない秒数」として上位へ返す。
-        rate_limit_waits: list[float] = []
-
+        preferred: list[tuple[ProviderConfig, int, str, str]] = []
+        demoted: list[tuple[ProviderConfig, int, str, str]] = []
         for config in self._providers:
             # config.keys_envからAPIキーを取得する。もしkeysが空なら、次のプロバイダへ。
             keys = resolve_api_keys(config.keys_env)
@@ -232,120 +272,193 @@ class ResilientLLMClient:
                     config.keys_env
                 )
                 continue
-
-            # すべてのキーを順番に試す。1キーで1リクエスト。
+            # すべてのキー x モデルを順番に試す。1キーで1リクエスト。
             for key_number, key in enumerate(keys, start=1):
                 for model in config.models:
-                    # Providerを生成して、generate()を呼ぶ。
-                    provider = self._provider_factory(config, self._transport, key, model)
+                    combo = (config, key_number, key, model)
+                    if (config.name, key_number, model) in self._disabled:
+                        demoted.append(combo)
+                    else:
+                        preferred.append(combo)
+        return preferred + demoted
 
-                    # 1キーでのリトライループ。バックオフ再送 -> 次キー -> 次プロバイダ の順にフォールバックする。
-                    for attempt_on_key in range(self._retry.max_retries_per_key + 1):
-                        attempts += 1
+    def _sweep(
+        self,
+        messages: list[dict[str, str]],
+        stop_sequences: list[str],
+        max_tokens: int,
+        attempts_so_far: int,
+        wasted: list[int]
+    ) -> LLMResponse:
+        """全プロバイダ / 全キー / 全モデルを優先度順に1周だけ試す.
 
-                        try:
-                            response = provider.generate(messages, stop_sequences, max_tokens)
+        Args:
+            messages (list[dict[str, str]]): LLMに送信するメッセージ。
+            stop_sequences (list[str]): 生成を停止する文字列郡。
+            max_tokens (int): 生成する最大トークン数。
+            attempts_so_far (int): 前の周回までに送信した回数(通算の試行回数を引き継ぐ)。
+            wasted (list[int]): [入力, 出力] 失敗した試行が消費したトークンの累計。この関数が加算する。
 
-                        # 1. RateLimitErrorは次のキーへ。バックオフはしない。
-                        except RateLimitError as error:
-                            last_error = error
-                            rate_limit_waits.append(
-                                error.retry_after if error.retry_after is not None
-                                else self._retry.backoff_max_seconds
-                            )
-                            self._log.warning(
-                                "provider=%s key#%d attempts=%d rate limited (retry_after=%s); advance, no backoff.",
-                                config.name,
-                                key_number,
-                                attempts,
-                                error.retry_after
-                            )
-                            break
+        Returns:
+            LLMResponse: 生成テキストと使用量、計測値をまとめた結果。
 
-                        # 2. ServerError / 3. TransportError は一過性(500系 / ネットワークエラー)。バックオフして同一キーで再送。
-                        except (ServerError, TransportError) as error:
-                            last_error = error
-                            # 1つのキーでのリトライ回数が上限に達したら、次のキーへ。
-                            if attempt_on_key >= self._retry.max_retries_per_key:
-                                self._log.warning(
-                                    "provider=%s key#%d attempts=%d %s; give up key",
-                                    config.name,
-                                    key_number,
-                                    attempts,
-                                    type(error).__name__
-                                )
-                                break
+        Raises:
+            AllProvidersExhausted: この周回で全組合せが失敗した場合。
+        """
+        attempts = attempts_so_far
+        last_error: BaseException | None = None
+        # 周回中に観測した429の待機秒数。retry_afterが無い429は上限秒で代用し、
+        # 最短のものを「待てば解けるかもしれない秒数」として上位へ返す。
+        rate_limit_waits: list[float] = []
 
-                            # バックオフ秒数を計算し、残予算がなければ次のキーへ。
-                            wait = self._wait_seconds(error, attempt_on_key)
-                            if wait is None:
-                                self._log.warning(
-                                    "provider=%s key#%d attempts=%d %s; no time budget, give up key.",
-                                    config.name,
-                                    key_number,
-                                    attempts,
-                                    type(error).__name__
-                                )
-                                break
+        for config, key_number, key, model in self._candidates():
+            combo_id = (config.name, key_number, model)
 
-                            # バックオフ秒数待機し、同一キーで再送する。
-                            self._log.warning(
-                                "provider=%s key#%d attempts=%d %s; backoff %.1fs.",
-                                config.name,
-                                key_number,
-                                attempts,
-                                type(error).__name__,
-                                wait
-                            )
-                            self._sleep(wait)
+            # 1キーでのリトライループ。バックオフ再送 -> 次キー -> 次プロバイダ の順にフォールバックする。
+            for attempt_on_key in range(self._retry.max_retries_per_key + 1):
+                # 残り時間に収まるタイムアウトで送る。もう時間が無ければ周回自体を打ち切る。
+                timeout = self._request_timeout(config)
+                if timeout is None:
+                    raise AllProvidersExhausted(
+                        f"No time budget left after {attempts} attempt(s).",
+                        attempts=attempts
+                    ) from last_error
+                provider = self._provider_factory(
+                    config.model_copy(update={"request_timeout_sec": timeout}), self._transport, key, model
+                )
+                attempts += 1
 
-                        # 4. 認証エラー(401 / 403)は次のキーへ。バックオフはしない。
-                        except AuthenticationError as error:
-                            last_error = error
-                            self._log.warning(
-                                "provider=%s key#%d attempts=%d auth/quota; next key.",
-                                config.name,
-                                key_number,
-                                attempts
-                            )
-                            break
+                try:
+                    response = provider.generate(messages, stop_sequences, max_tokens)
 
-                        # 5. BadRequestErrorはリクエスト不正。
-                        except BadRequestError as error:
-                            last_error = error
-                            self._log.error(
-                                "provider=%s key#%d bad request; skip key: %s.",
-                                config.name,
-                                key_number,
-                                error
-                            )
-                            break
+                # 1. RateLimitErrorは次のキーへ。バックオフはしない。
+                except RateLimitError as error:
+                    last_error = error
+                    rate_limit_waits.append(
+                        error.retry_after if error.retry_after is not None
+                        else self._retry.backoff_max_seconds
+                    )
+                    self._log.warning(
+                        "provider=%s key#%d model=%s attempts=%d rate limited (retry_after=%s); advance, no backoff.",
+                        config.name,
+                        key_number,
+                        model,
+                        attempts,
+                        error.retry_after
+                    )
+                    break
 
-                        # 6. その他の想定外LLM層失敗(JSONパース失敗 / content=null 等)。
-                        #    クラッシュさせず、この組合せを飛ばして次へ(全滅ならAllProvidersExhausted)。
-                        except LLMError as error:
-                            last_error = error
-                            self._log.warning(
-                                "provider=%s key#%d attempts=%d unexpected LLM error; advance: %s",
-                                config.name,
-                                key_number,
-                                attempts,
-                                error
-                            )
-                            break
+                # 2. ServerError / 3. TransportError は一過性(500系 / ネットワークエラー)。バックオフして同一キーで再送。
+                except (ServerError, TransportError) as error:
+                    last_error = error
+                    # 1つのキーでのリトライ回数が上限に達したら、次のキーへ。
+                    if attempt_on_key >= self._retry.max_retries_per_key:
+                        self._log.warning(
+                            "provider=%s key#%d model=%s attempts=%d %s; give up key",
+                            config.name,
+                            key_number,
+                            model,
+                            attempts,
+                            type(error).__name__
+                        )
+                        break
 
-                        # エラーが発生しなければ、成功。LLMResponseを返す。
-                        else:
-                            if attempts > 1:
-                                response = response.model_copy(update={"retries": attempts - 1})
+                    # バックオフ秒数を計算し、残予算がなければ次のキーへ。
+                    wait = self._wait_seconds(error, attempt_on_key)
+                    if wait is None:
+                        self._log.warning(
+                            "provider=%s key#%d model=%s attempts=%d %s; no time budget, give up key.",
+                            config.name,
+                            key_number,
+                            model,
+                            attempts,
+                            type(error).__name__
+                        )
+                        break
 
-                            self._log.info(
-                                "provider=%s key#%d success after %d attempt(s)",
-                                config.name,
-                                key_number,
-                                attempts
-                            )
-                            return response
+                    # バックオフ秒数待機し、同一キーで再送する。
+                    self._log.warning(
+                        "provider=%s key#%d model=%s attempts=%d %s; backoff %.1fs.",
+                        config.name,
+                        key_number,
+                        model,
+                        attempts,
+                        type(error).__name__,
+                        wait
+                    )
+                    self._sleep(wait)
+
+                # 4. 認証エラー(401 / 403)は次のキーへ。バックオフはしない。
+                except AuthenticationError as error:
+                    last_error = error
+                    self._disabled.add(combo_id)
+                    self._log.warning(
+                        "provider=%s key#%d model=%s attempts=%d auth/quota; next key.",
+                        config.name,
+                        key_number,
+                        model,
+                        attempts
+                    )
+                    break
+
+                # 5. BadRequestErrorはリクエスト不正(このモデル/キーでは直らない)。次の組合せへ。
+                except BadRequestError as error:
+                    last_error = error
+                    self._disabled.add(combo_id)
+                    self._log.error(
+                        "provider=%s key#%d model=%s bad request; skip: %s.",
+                        config.name,
+                        key_number,
+                        model,
+                        error
+                    )
+                    break
+
+                # 6. 本文が空(思考だけで上限に達した等)。消費したトークンを計上して次へ。
+                except EmptyResponseError as error:
+                    last_error = error
+                    wasted[0] += error.input_tokens
+                    wasted[1] += error.output_tokens
+                    self._disabled.add(combo_id)
+                    self._log.warning(
+                        "provider=%s key#%d model=%s attempts=%d empty response (wasted in=%d out=%d); advance.",
+                        config.name,
+                        key_number,
+                        model,
+                        attempts,
+                        error.input_tokens,
+                        error.output_tokens
+                    )
+                    break
+
+                # 7. その他の想定外LLM層失敗(JSONパース失敗等)。
+                #    クラッシュさせず、この組合せを飛ばして次へ(全滅ならAllProvidersExhausted)。
+                except LLMError as error:
+                    last_error = error
+                    self._disabled.add(combo_id)
+                    self._log.warning(
+                        "provider=%s key#%d model=%s attempts=%d unexpected LLM error; advance: %s",
+                        config.name,
+                        key_number,
+                        model,
+                        attempts,
+                        error
+                    )
+                    break
+
+                # エラーが発生しなければ、成功。LLMResponseを返す。
+                else:
+                    if attempts > 1:
+                        response = response.model_copy(update={"retries": attempts - 1})
+                    self._disabled.discard(combo_id)
+                    self._log.info(
+                        "provider=%s key#%d model=%s success after %d attempt(s)",
+                        config.name,
+                        key_number,
+                        model,
+                        attempts
+                    )
+                    return response
 
         # この周回で全組合せが失敗した。429を観測していればその最短待機秒数を添えて送出し、
         # generate()が「待てば解けるか」を判断する。attemptsはリトライを含む総試行回数。

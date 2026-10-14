@@ -9,7 +9,7 @@ tokensはusage.pyで集計する、なければ概算。
 import json
 from typing import Any
 
-from src.agent.llm.provider.provider import LLMProvider, LLMResponse, LLMError
+from src.agent.llm.provider.provider import EmptyResponseError, LLMProvider, LLMResponse, LLMError
 from src.agent.llm.usage import extract_token_usage
 
 
@@ -65,15 +65,22 @@ class OpenAICompatProvider(LLMProvider):
         # 推論志向モデル(gpt-oss / nemotron 等)は本文をreasoningチャンネルに置き、
         # contentを空 / nullにして返すことがある。その場合はreasoningを本文として扱い、
         # 抽出層に渡す(捨てると毎回NO_CODEになり反復だけが消費される)。
+        # 欄の名前はプロバイダで異なる(groq: reasoning / NVIDIA・DeepSeek系: reasoning_content)。
         if not (isinstance(text, str) and text.strip()):
-            reasoning = message.get("reasoning")
-            if isinstance(reasoning, str) and reasoning.strip():
-                text = reasoning
+            for field in ("reasoning", "reasoning_content"):
+                reasoning = message.get(field)
+                if isinstance(reasoning, str) and reasoning.strip():
+                    text = reasoning
+                    break
 
-        # それでも本文が無ければ解釈不能。LLMErrorに正規化して上位(ResilientLLMClient)に握らせる。
+        # それでも本文が無ければ使えない。ただしプロバイダ側ではトークンを消費しているので、
+        # 使用量を持たせたEmptyResponseErrorにして上位(ResilientLLMClient)に計上させる。
         if not isinstance(text, str) or not text.strip():
-            raise LLMError(
-                f"empty content from provider={self.config.name} model={self.model}: {body[:300]}"
+            wasted_input, wasted_output = extract_token_usage(data, "")
+            raise EmptyResponseError(
+                f"empty content from provider={self.config.name} model={self.model}: {body[:300]}",
+                input_tokens=wasted_input,
+                output_tokens=wasted_output,
             )
 
         input_tokens, output_tokens = extract_token_usage(data, text)

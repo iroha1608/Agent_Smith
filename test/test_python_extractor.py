@@ -22,10 +22,19 @@ def test_extracts_single_block(extractor: PythonCodeExtractor) -> None:
     assert extractor.extract(text) == "print('hi')"
 
 
-def test_returns_last_block_when_multiple(extractor: PythonCodeExtractor) -> None:
-    """複数ブロックがあるとき最後のブロックを返す(D-b)."""
+def test_joins_multiple_blocks_when_valid(extractor: PythonCodeExtractor) -> None:
+    """複数ブロックは、連結して構文が通るなら順に全部実行する(定義と検証を分けて書くモデル対策)."""
     text = (
-        "例:\n```python\nx = 1\n```\n"
+        "定義:\n```python\ndef f():\n    return 1\n```\n"
+        "検証:\n```python\nprint(f())\n```\n"
+    )
+    assert extractor.extract(text) == "def f():\n    return 1\n\nprint(f())"
+
+
+def test_returns_last_block_when_join_is_invalid(extractor: PythonCodeExtractor) -> None:
+    """連結すると構文エラーになる場合は、従来どおり最後のブロックを返す."""
+    text = (
+        "例:\n```python\nif x:\n```\n"
         "本命:\n```python\nx = 2\nprint(x)\n```\n"
     )
     assert extractor.extract(text) == "x = 2\nprint(x)"
@@ -157,3 +166,31 @@ def test_unclosed_salvage_drops_a_trailing_fence(extractor: PythonCodeExtractor)
     assert code is not None
     compile(code, "<test>", "exec")
     assert "```" not in code
+
+
+def test_unwraps_json_code_payload(extractor: PythonCodeExtractor) -> None:
+    """```python の中が {"code": "..."} の包みなら中のコードを取り出す(nemotron実測)."""
+    text = '```python\n{\n    "code": "def f():\\n    return 1\\nprint(f())"\n}\n```'
+    assert extractor.extract(text) == "def f():\n    return 1\nprint(f())"
+
+
+def test_plain_dict_literal_is_not_unwrapped(extractor: PythonCodeExtractor) -> None:
+    """codeキーを持たない普通のdictはそのまま実行する."""
+    text = '```python\n{"a": 1}\n```'
+    assert extractor.extract(text) == '{"a": 1}'
+
+
+def test_strip_stop_sequences_removes_leaked_prefix() -> None:
+    """閉じフェンスの直後に漏れた停止シーケンスの前半を取り除き、閉じフェンスを認識できる."""
+    from src.agent.extractor.python_extractor import strip_stop_sequences
+    leaked = "Thought: x\n```python\nprint(1)\n```<end_code"
+    cleaned = strip_stop_sequences(leaked, ["<end_code>"])
+    assert cleaned.rstrip().endswith("```")
+    assert PythonCodeExtractor().extract(cleaned) == "print(1)"
+
+
+def test_strip_stop_sequences_keeps_normal_text() -> None:
+    """完全な停止シーケンスは除き、残骸の無い本文は変えない."""
+    from src.agent.extractor.python_extractor import strip_stop_sequences
+    assert strip_stop_sequences("a\n```\n<end_code>", ["<end_code>"]) == "a\n```\n"
+    assert strip_stop_sequences("x = a < b", ["<end_code>"]) == "x = a < b"

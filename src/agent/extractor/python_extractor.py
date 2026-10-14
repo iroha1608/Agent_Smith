@@ -48,6 +48,77 @@ _CODE_LIKE_NODES = (
 SALVAGE_UNCLOSED_FENCE = "unclosed_fence"
 SALVAGE_UNFENCED = "unfenced"
 SALVAGE_ESCAPED_QUOTES = "escaped_quotes"
+SALVAGE_JSON_WRAPPED = "json_wrapped"
+SALVAGE_MULTIPLE_BLOCKS = "multiple_blocks"
+
+# 停止シーケンスの「前半だけ」が本文末尾に漏れたものを取り除くときの最短長。
+# 1文字("<"など)は正当なコードの末尾でもあり得るので対象にしない。
+_MIN_LEAKED_STOP_PREFIX = 2
+
+
+def strip_stop_sequences(text: str, stop_sequences: list[str]) -> str:
+    """LLM出力から停止シーケンスとその残骸を取り除く.
+
+    停止シーケンスはAPI側で生成を止めるための印で、コードの一部ではない。完全な形で
+    混ざっていれば全て除き、本文の末尾に前半だけが残っていればそれも除く。
+    実測(NVIDIA NIMのnemotron-3-super): 22ステップ中17回、本文が ```` ```<end_code ```` で
+    終わっていた(`>`の手前で止まり、そこまでが本文に含まれる)。閉じフェンスと同じ行に
+    残骸があるため閉じフェンスと認識されず、未閉鎖ブロックの救済に回って残骸ごと実行され
+    SyntaxErrorになっていた。
+
+    Args:
+        text (str): LLMの生の出力。
+        stop_sequences (list[str]): リクエストに指定した停止シーケンス。
+
+    Returns:
+        str: 停止シーケンスとその残骸を除いた文字列。
+    """
+    cleaned = text
+    for stop in stop_sequences:
+        if stop:
+            cleaned = cleaned.replace(stop, "")
+    stripped = cleaned.rstrip()
+    for stop in stop_sequences:
+        for length in range(len(stop) - 1, _MIN_LEAKED_STOP_PREFIX - 1, -1):
+            if stripped.endswith(stop[:length]):
+                return stripped[:-length].rstrip() + "\n"
+    return cleaned
+
+
+def _unwrap_json_code(code: str) -> str | None:
+    """```python ブロックの中身が {"code": "..."} 形式の包みなら、中のコードを取り出す.
+
+    ツール呼び出しのJSONで学習したモデルは、Pythonブロックの中に
+    `{"code": "print(1)"}` のようなJSONを書くことがある(実測: NVIDIAのnemotronがMBPP
+    タスク305で4反復連続)。dictリテラルとしては正しいPythonなので実行しても何も起きず、
+    反復だけが消費される。中身が「codeキーに文字列を持つdict」だけのときに限り展開する。
+
+    Args:
+        code (str): フェンスから取り出したコード。
+
+    Returns:
+        str | None: 展開したコード。包みでなければNone。
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return None
+    if len(tree.body) != 1 or not isinstance(tree.body[0], ast.Expr):
+        return None
+    node = tree.body[0].value
+    if not isinstance(node, ast.Dict):
+        return None
+    try:
+        payload = ast.literal_eval(node)
+    except (ValueError, SyntaxError):
+        return None
+    if isinstance(payload.get("arguments"), dict):
+        payload = payload["arguments"]
+    inner = payload.get("code")
+    if isinstance(inner, str) and inner.strip():
+        return inner
+    return None
+
 
 # JSON形式のツール呼び出しで学習したモデルは、コードブロック全体をJSON文字列のように
 # エスケープして返すことがある。実測(gpt-oss, MBPPタスク305): few-shotの
@@ -98,12 +169,22 @@ def _extract_with_kind(llm_output: str) -> tuple[str | None, str | None]:
         tuple[str | None, str | None]: (抽出したコード, 救済の種類)。
             抽出できなければ(None, None)。正規のブロックをそのまま使えたなら種類はNone。
     """
-    blocks = _PYTHON_CODE_BLOCK_PATTERN.findall(llm_output)
+    blocks = [str(block).rstrip() for block in _PYTHON_CODE_BLOCK_PATTERN.findall(llm_output)]
     kind: str | None = None
     code: str | None = None
-    if blocks:
-        # 複数ある場合は最後のブロックを使う
-        code = str(blocks[-1].rstrip())
+    if len(blocks) > 1:
+        # 「関数定義のブロック」と「それを検証するブロック」に分けて書くモデルがある
+        # (実測: nemotron。最後のブロックだけを実行すると定義が無くNameErrorになり、
+        # 打ち切り時のフォールバック候補も残らない)。連結して構文が通れば全部を順に実行し、
+        # 通らなければ従来どおり最後のブロックを使う。
+        joined = "\n\n".join(blocks)
+        try:
+            ast.parse(joined)
+            code, kind = joined, SALVAGE_MULTIPLE_BLOCKS
+        except SyntaxError:
+            code = blocks[-1]
+    elif blocks:
+        code = blocks[0]
     else:
         match = _UNCLOSED_CODE_BLOCK_PATTERN.search(llm_output)
         if match and match.group(1).strip():
@@ -116,6 +197,10 @@ def _extract_with_kind(llm_output: str) -> tuple[str | None, str | None]:
                 kind = SALVAGE_UNFENCED
     if code is None:
         return None, None
+
+    unwrapped = _unwrap_json_code(code)
+    if unwrapped is not None:
+        return unwrapped, SALVAGE_JSON_WRAPPED
 
     # 過剰エスケープは実行自体を止めてしまうので、他の救済より優先して報告する
     repaired = _repair_escaped_quotes(code)

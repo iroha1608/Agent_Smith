@@ -334,5 +334,8 @@ def test_total_requests_includes_failed_attempts() -> None:
     solution = orchestrator.run("82", "mbpp", "task")
     assert solution.success is False
     assert solution.error == "LLM_UNAVAILABLE"
-    assert len(solution.steps) == 1          # 1回目のstepだけ積まれる
+    # 全滅した反復も記録する(反復数とstepsの数を一致させる)
+    assert len(solution.steps) == 2
+    assert solution.iterations == 2
+    assert solution.steps[1].sandbox_output.startswith("[LLM_UNAVAILABLE]")
     assert solution.total_requests == 1 + 3  # step1の1試行 + 全滅時の3試行
