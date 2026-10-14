@@ -1,6 +1,6 @@
 """LLMに送るシステムプロンプトのテンプレートと組み立てを管理するモジュール.
 
-共通テンプレートにTaskProfileの4要素を差し込み、
+共通テンプレートにTaskProfileの5要素(形式ルール・マニュアル・提出仕様・例・指示)を差し込み、
 タスク種別ごとのシステムプロンプトをbuild_system_prompt()で生成する。
 """
 from src.agent.prompt.task_profile.task_profile import TaskProfile
@@ -13,14 +13,7 @@ COMMON_TEMPLATE = """You are Agent Smith, an autonomous coding agent.
 Loop: Thought (one line) -> ONE Python code block -> read the Observation.
 
 ## Format
-- One brief Thought line (20 words max), then exactly ONE block fenced as ```python ... ```,
-  then <end_code>.
-- NEVER derive formulas or trace arithmetic in prose. Your turn is cut off at a hard output
-  limit, and a reply that never closes a ```python block runs nothing and burns the budget.
-  Write the candidate in code and let the Observation correct you.
-- Only what you print() (plus errors and tracebacks) comes back in the Observation.
-- The namespace persists between turns, but your FINAL answer must be SELF-CONTAINED.
-- Limits on iterations, tokens and time are strict: keep turns short, never print large output.
+{format_rules}
 
 ## Environment and tools
 {tools_manual}
@@ -47,6 +40,7 @@ def build_system_prompt(profile: TaskProfile, sandbox: SandboxBase) -> str:
         str: 組み立てられたシステムプロンプト
     """
     return COMMON_TEMPLATE.format(
+        format_rules=profile.format_rules(),
         tools_manual=profile.manual(sandbox),
         final_answer_specification=profile.final_answer_specification(),
         few_shot_example=profile.few_shot_example(),

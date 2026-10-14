@@ -3,7 +3,7 @@ from src.agent.llm.resilient_client import AllProvidersExhausted
 from src.agent.extractor.python_extractor import PythonCodeExtractor
 from src.agent.llm.provider.provider import LLMProvider, LLMResponse
 from src.agent.orchestrator import Orchestrator
-from src.agent.prompt.task_profile.mbpp_profile import MBPPProfile
+from src.agent.prompt.task_profile.mbpp_profile import MBPPProfile, mbpp_rejection
 from src.config.settings import Limits
 from src.sandbox.mock import MockSandbox
 
@@ -185,8 +185,8 @@ _HARNESS_WRAPPER = (
 
 def test_reject_reason_accepts_imports_and_definitions() -> None:
     """import + 関数定義だけの提出は受理する(モジュールdocstring/定数も可)."""
-    assert Orchestrator._reject_reason(_SUBMITTABLE) is None
-    assert Orchestrator._reject_reason('"""doc."""\nLIMIT = 3\n\n\ndef f():\n    return LIMIT\n') is None
+    assert mbpp_rejection(_SUBMITTABLE) is None
+    assert mbpp_rejection('"""doc."""\nLIMIT = 3\n\n\ndef f():\n    return LIMIT\n') is None
 
 
 def test_reject_reason_rejects_sandbox_only_names() -> None:
@@ -194,7 +194,7 @@ def test_reject_reason_rejects_sandbox_only_names() -> None:
 
     採点側はこれらを定義しないため、提出すると NameError で全テストが落ちる。
     """
-    reason = Orchestrator._reject_reason(_HARNESS_WRAPPER)
+    reason = mbpp_rejection(_HARNESS_WRAPPER)
     assert reason is not None
     assert "run_tests" in reason
 
@@ -203,16 +203,16 @@ def test_reject_reason_rejects_top_level_statements() -> None:
     """トップレベルのデモ呼び出しやassertは拒否する(採点時に例外を投げ得る)."""
     for bad in ("def f():\n    return 1\n\n\nprint(f())\n",
                 "def f():\n    return 1\n\n\nassert f() == 1\n"):
-        reason = Orchestrator._reject_reason(bad)
+        reason = mbpp_rejection(bad)
         assert reason is not None
         assert "top-level" in reason
 
 
 def test_reject_reason_rejects_empty_and_broken_code() -> None:
     """空 / 構文エラー / 関数定義なしはこれまでどおり拒否する."""
-    assert Orchestrator._reject_reason("") is not None
-    assert Orchestrator._reject_reason("def f(:\n    pass\n") is not None
-    assert Orchestrator._reject_reason("x = 1\n") is not None
+    assert mbpp_rejection("") is not None
+    assert mbpp_rejection("def f(:\n    pass\n") is not None
+    assert mbpp_rejection("x = 1\n") is not None
 
 
 def test_window_truncation_keeps_the_trailing_note() -> None:
@@ -222,12 +222,12 @@ def test_window_truncation_keeps_the_trailing_note() -> None:
     予算警告や提出の却下理由といった「次に何をすべきか」が必ず消えてLLMに届かない。
     """
     observation = "[OK] head marker\n" + ("x" * 5000) + "\n--- note ---\nTAIL MARKER"
-    windowed = Orchestrator._window_messages(
+    windowed = _orchestrator([])._window_messages(
         [{"role": "system", "content": "s"}, {"role": "user", "content": "task"},
          {"role": "assistant", "content": "a"}, {"role": "user", "content": observation}]
     )
     sent = windowed[-1]["content"]
-    assert len(sent) <= Orchestrator._OBS_MAX_CHARS + len("\n...[truncated]...\n")
+    assert len(sent) <= MBPPProfile.observation_max_chars + len("\n...[truncated]...\n")
     assert "head marker" in sent
     assert "TAIL MARKER" in sent
 

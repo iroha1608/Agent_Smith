@@ -3,22 +3,93 @@
 タスク種別ごとのプロンプト差分の注入口。
 共通テンプレートに差し込む、タスク種別で変わる要素を抽象メソッドとして持つ。
 新しいタスク種別を足すときは、このクラスを継承したプロファイルを1つ実装する。
-- [x] models/以下に移動可能性あり。
-- [ ] MBPPProfile, SWEBenchProfileが継承、他にタスクを増やしたい時用。
-- [ ] few-shotを1例、各プロファイルごとに定義する。
-- [ ] manualはname(args) -> ret: + 1行説明。非自明のものは小例をつける。
-    - [ ] sandbox.manual()から動的差し込みし、実際のツール数に合わせる。
+
+プロンプト以外にも、タスク種別で変わる「提出物の扱い」と「履歴の窓幅」をここに置く。
+Orchestrator(ループ本体)はタスク種別を知らずに済み、MBPP(関数のソース)と
+SWE-bench(gitパッチ)の違いはプロファイルの差し替えだけで表現できる。
 """
 from abc import ABC, abstractmethod
 
 from src.models.sandbox_base import SandboxBase
 
+# 全タスク共通の出力形式のルール(システムプロンプトの ## Format 節)
+DEFAULT_FORMAT_RULES = """- One brief Thought line (20 words max), then exactly ONE block fenced as ```python ... ```,
+  then <end_code>.
+- NEVER derive formulas or trace arithmetic in prose. Your turn is cut off at a hard output
+  limit, and a reply that never closes a ```python block runs nothing and burns the budget.
+  Write the candidate in code and let the Observation correct you.
+- Only what you print() (plus errors and tracebacks) comes back in the Observation.
+- The namespace persists between turns, but your FINAL answer must be SELF-CONTAINED.
+- Limits on iterations, tokens and time are strict: keep turns short, never print large output."""
+
 
 class TaskProfile(ABC):
-    """タスク種別ごとのプロンプト差分を提供する抽象基底クラス.
+    """タスク種別ごとのプロンプト差分と提出物の扱いを提供する抽象基底クラス.
 
-    具象クラスが下記4メソッドを実装する。
+    具象クラスがプロンプトの4メソッドを実装する。提出物の検査・整形、打ち切り時の
+    フォールバック、履歴の窓幅は既定の実装があり、必要なプロファイルだけが上書きする。
+
+    Attributes:
+        history_window (int): LLMへ再送する直近の往復数。
+        observation_max_chars (int): 再送するObservation(role=user)1件の最大文字数。
+        assistant_max_chars (int): 再送するassistant発話1件の最大文字数。
     """
+
+    history_window: int = 2
+    observation_max_chars: int = 800
+    assistant_max_chars: int = 1200
+
+    def format_rules(self) -> str:
+        """システムプロンプトの出力形式のルールを返す.
+
+        Returns:
+            str: ## Format 節に入れるルール
+        """
+        return DEFAULT_FORMAT_RULES
+
+    def sanitize_submission(self, raw: str) -> str:
+        """final_answer()に渡された値を、採点に出せる形へ整える.
+
+        Args:
+            raw (str): final_answer()が捕捉した生の文字列。
+
+        Returns:
+            str: 整えた提出物。
+        """
+        return raw.strip()
+
+    def submission_rejection(self, candidate: str) -> str | None:
+        """提出物を受理してよいか検査し、だめならLLMへ返す理由を返す.
+
+        Args:
+            candidate (str): sanitize_submission()済みの提出物。
+
+        Returns:
+            str | None: 受理できるならNone。だめなら理由。
+        """
+        return None if candidate else "final_answer() received an empty value"
+
+    def is_fallback_candidate(self, code: str) -> bool:
+        """エラー無く実行できたコードを、打ち切り時に提出する候補として残すかを返す.
+
+        Args:
+            code (str): その反復で実行したコード。
+
+        Returns:
+            bool: 候補として残すならTrue。
+        """
+        return False
+
+    def fallback_solution(self, sandbox: SandboxBase) -> str:
+        """提出が無いまま打ち切られたとき、環境から回収できる最善の提出物を返す.
+
+        Args:
+            sandbox (SandboxBase): 接続中のサンドボックス。
+
+        Returns:
+            str: 回収した提出物。無ければ空文字。
+        """
+        return ""
 
     @abstractmethod
     def task_instructions(self) -> str:

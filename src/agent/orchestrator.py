@@ -8,7 +8,6 @@ LimitTrackerの先頭ガード -> LLM生成 -> <end_code>除去 -> コード抽�
  のループを回す。
  final_answer()で成功終了、ハード制限で打ち切り。
 """
-import ast
 from collections.abc import Callable
 
 from src.agent.extractor.code_extractor import CodeExtractor
@@ -226,23 +225,23 @@ class Orchestrator:
             # 検査に落ちた提出は受理せず、理由をObservationに足してLLMに直させる。
             submission: str | None = None
             if result.final_answer_bool:
-                candidate = self._sanitize_solution(result.final_answer or "")
-                rejection = self._reject_reason(candidate)
+                candidate = self.profile.sanitize_submission(result.final_answer or "")
+                rejection = self.profile.submission_rejection(candidate)
                 if rejection is None and self.solution_verifier is not None:
                     verified, detail = self.solution_verifier(candidate)
                     if not verified:
-                        rejection = f"the submitted code did not pass the task tests: {detail}"
+                        rejection = f"the submission did not pass the task's checks: {detail}"
                 if rejection is None:
                     submission = candidate
                 else:
                     best_solution = candidate or best_solution
                     observation = (
                         f"{observation}\n--- submission rejected ---\n{rejection}\n"
-                        "Fix the solution string and call final_answer again."
+                        "Fix it and call final_answer again."
                     )
-            elif result.error is None and self._reject_reason(code) is None:
-                # 打ち切り時のフォールバック候補。提出可能な形(構文が通り関数定義を含む)の
-                # コードだけを残す。デバッグ用のprintだけの断片を出すと確実に不合格になる。
+            elif result.error is None and self.profile.is_fallback_candidate(code):
+                # 打ち切り時のフォールバック候補。提出可能な形のコードだけを残す
+                # (MBPPなら構文が通り関数定義を含むもの。printだけの断片は確実に不合格になる)。
                 best_solution = code
 
             observation = self._with_budget_note(observation, tracker)
@@ -284,12 +283,6 @@ class Orchestrator:
         if callable(rotate):
             rotate()
 
-    # 送信履歴の窓(直近N往復)と1メッセージの最大文字数。累積入力トークンを抑えるための切り詰め設定。
-    _HISTORY_WINDOW = 2
-    _OBS_MAX_CHARS = 800
-    # 履歴として再送するassistant発話の上限。自分が書いたコード全文を毎回送り直すと
-    # 反復2回目以降の入力が一気に膨らみ、累積入力の上限(6000)を食い潰す。
-    _ASSISTANT_MAX_CHARS = 1200
     # トークン見積もりの係数(1トークンあたりの文字数)の初期値。事前ガードで使うため安全側に
     # 小さめに取る。実測(2026-10-15・過去runの全ステップを再構成して比較): 中央値は3.7〜4.1だが
     # qwenは最小3.03・command-aは3.49。旧値3.6では見積もりが甘く、geminiで6309/6000を踏み越えた。
@@ -362,7 +355,7 @@ class Orchestrator:
     ) -> list[dict[str, str]] | None:
         """累積入力トークンの上限に収まる送信履歴を返す。どう縮めても収まらなければNone.
 
-        直近 _HISTORY_WINDOW 往復 -> 1往復 -> system+タスク文だけ、の順に縮める。
+        直近 profile.history_window 往復 -> ... -> 1往復 -> system+タスク文だけ、の順に縮める。
         いきなり履歴を全部捨てると、直前の失敗とその原因(Observation)をLLMが見られず
         同じ失敗を繰り返すため、まず1往復だけ残す段階を挟む。
 
@@ -374,118 +367,35 @@ class Orchestrator:
             list[dict[str, str]] | None: 送信用メッセージ列。収まらなければNone。
         """
         budget = self.limits.max_input_tokens - tracker.total_input_tokens
-        for window in range(self._HISTORY_WINDOW, -1, -1):
+        for window in range(self.profile.history_window, -1, -1):
             candidate = self._window_messages(messages, window)
             if self._estimate_tokens(candidate) <= budget:
                 return candidate
         return None
 
-    @staticmethod
-    def _sanitize_solution(raw: str) -> str:
-        """final_answer()に渡された文字列を、そのまま採点に出せる形へ整える.
-
-        LLMはしばしばmarkdownのコードフェンス付きで提出する。採点側は提出文字列に
-        テスト行を連結して実行するため、フェンスが残っていると構文エラーになる。
-
-        Args:
-            raw (str): final_answer()が捕捉した生の文字列。
-
-        Returns:
-            str: 前後の空白とコードフェンスを除去した提出コード。
-        """
-        text = raw.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            lines = lines[1:]  # ```python 等の開始フェンスを落とす
-            while lines and lines[-1].strip().startswith("```"):
-                lines.pop()
-            text = "\n".join(lines).strip()
-        return text
-
-    # 採点環境に存在しないサンドボックス専用の名前。これらを参照するコードを提出すると
-    # NameErrorで全テストが落ちる。実測(MBPPタスク160)では、打ち切り時のフォールバックが
-    # `report = json.loads(run_tests(code="""..."""))` という検証用ラッパーをそのまま提出していた。
-    _SANDBOX_ONLY_NAMES = frozenset({"run_tests", "final_answer"})
-    # トップレベルに置いても採点時に例外を投げない文。採点側は提出コードにテスト行を
-    # 連結してファイル全体を実行するため、これ以外の文(デモ呼び出し/assert/print等)は
-    # 1つでも例外を投げると提出全体が不合格になる。
-    _ALLOWED_TOP_LEVEL = (
-        ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef,
-        ast.ClassDef, ast.Assign, ast.AnnAssign,
-    )
-
-    @classmethod
-    def _reject_reason(cls, solution: str) -> str | None:
-        """提出コードを受理してよいか検査し、だめな理由を返す.
-
-        採点側は提出コードに隠しテストを連結してファイル全体を実行し、exit 0のみを合格とする。
-        そのため「構文が通る」だけでは足りず、(1)関数定義がある (2)トップレベルに例外を
-        投げ得る文が無い (3)サンドボックス専用の名前を参照していない の3点を確かめる。
-
-        Args:
-            solution (str): サニタイズ済みの提出コード。
-
-        Returns:
-            str | None: 受理可能ならNone。不可なら理由の文字列。
-        """
-        if not solution:
-            return "final_answer() received an empty value"
-        try:
-            tree = ast.parse(solution)
-        except SyntaxError as error:
-            return f"the submitted code is not valid Python ({error.msg} on line {error.lineno})"
-
-        # サンドボックス専用名の検査を先に行う。検証ラッパーをそのまま提出した場合、
-        # 関数定義が文字列リテラルの中にあるため「関数定義なし」が先に当たってしまい、
-        # 本当の原因(ラッパーごと提出した)が伝わらない。
-        referenced = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
-        blocked = sorted(referenced & cls._SANDBOX_ONLY_NAMES)
-        if blocked:
-            return (
-                f"the submitted code calls {', '.join(blocked)}, which exist only inside this "
-                "sandbox. Submit just the function source, with no test harness around it"
-            )
-
-        if not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in tree.body):
-            return "the submitted code contains no function definition"
-
-        for node in tree.body:
-            if isinstance(node, cls._ALLOWED_TOP_LEVEL):
-                continue
-            # モジュールdocstringだけは例外を投げないので許す
-            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
-                    and isinstance(node.value.value, str):
-                continue
-            return (
-                f"the submitted code has a top-level {type(node).__name__} statement. Submit only "
-                "imports and the function definition(s): the grader appends its own tests to your "
-                "code and runs the whole file, so any extra statement that raises fails it"
-            )
-        return None
-
-    @staticmethod
-    def _window_messages(messages: list[dict[str, str]], window: int | None = None) -> list[dict[str, str]]:
+    def _window_messages(self, messages: list[dict[str, str]], window: int | None = None) -> list[dict[str, str]]:
         """LLMへ毎回再送する履歴を切り詰めて返す(累積入力トークン対策).
 
         Chat Completions はステートレスで毎回全履歴を送るため、反復が増えると累積入力が
         ハード上限(max_input_tokens)を食い潰す。system と最初のタスク文は常に残し、
-        それ以降は直近 _HISTORY_WINDOW 往復(assistant+user)だけを再送する。
-        長い Observation(role=user)は _OBS_MAX_CHARS、再送するassistant発話は
-        _ASSISTANT_MAX_CHARS で切り詰める(自分の書いたコード全文の再送が最大の膨張要因)。
+        それ以降は直近 window 往復(assistant+user)だけを再送する。
+        長い Observation(role=user)と再送するassistant発話は、プロファイルの上限文字数で
+        切り詰める(自分の書いたコード全文の再送が最大の膨張要因)。上限はタスク種別で違う
+        (MBPPは累積6000トークンと厳しく、SWE-benchはファイルを読むので長いObservationが要る)。
 
         Args:
             messages (list[dict[str, str]]): [system, user(task), (assistant, user)...] の全履歴。
-            window (int | None): 残す往復数。Noneなら _HISTORY_WINDOW。0ならsystemとタスク文だけ。
+            window (int | None): 残す往復数。Noneならプロファイルの既定。0ならsystemとタスク文だけ。
 
         Returns:
             list[dict[str, str]]: 切り詰めた送信用メッセージ列。
         """
-        keep = Orchestrator._HISTORY_WINDOW if window is None else window
+        keep = self.profile.history_window if window is None else window
         head = messages[:2]
         tail = messages[2:]
         tail = tail[-keep * 2:] if keep > 0 else []
 
-        limits = {"user": Orchestrator._OBS_MAX_CHARS, "assistant": Orchestrator._ASSISTANT_MAX_CHARS}
+        limits = {"user": self.profile.observation_max_chars, "assistant": self.profile.assistant_max_chars}
         trimmed: list[dict[str, str]] = []
         for message in tail:
             content = message["content"]
@@ -574,6 +484,13 @@ class Orchestrator:
                 （成功した場合はNone）
             failed_requests (int): LLM呼び出しが失敗した場合の総試行回数（リトライを含む / 既定0）
         """
+        if not success and not solution:
+            # 提出が無いまま打ち切られた。環境から回収できる最善の提出物があれば出す
+            # (SWE-benchなら編集済みのパッチ。空提出は確実に不合格なので、出さない理由が無い)。
+            try:
+                solution = self.profile.fallback_solution(self.sandbox)
+            except Exception:  # noqa: BLE001 - 回収の失敗で結果の書き出しまで失わない
+                solution = ""
         return SolutionOutput(
             task_id=task_id,
             benchmark=benchmark,

@@ -1,9 +1,99 @@
-"""MBPPタスク用のTaskProfileを定義するモジュール."""
+"""MBPPタスク用のTaskProfileを定義するモジュール.
+
+MBPPの提出物は「関数のソースコード」。採点側は提出コードに隠しテストを連結して
+ファイル全体を実行するため、その形で例外を投げないコードだけを受理する。
+"""
+import ast
+
 from src.agent.prompt.task_profile.task_profile import TaskProfile
 from src.models.sandbox_base import SandboxBase
 
+# 採点環境に存在しないサンドボックス専用の名前。これらを参照するコードを提出すると
+# NameErrorで全テストが落ちる。実測(MBPPタスク160)では、打ち切り時のフォールバックが
+# `report = json.loads(run_tests(code="""..."""))` という検証用ラッパーをそのまま提出していた。
+_SANDBOX_ONLY_NAMES = frozenset({"run_tests", "final_answer"})
+# トップレベルに置いても採点時に例外を投げない文。採点側は提出コードにテスト行を
+# 連結してファイル全体を実行するため、これ以外の文(デモ呼び出し/assert/print等)は
+# 1つでも例外を投げると提出全体が不合格になる。
+_ALLOWED_TOP_LEVEL = (
+    ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef,
+    ast.ClassDef, ast.Assign, ast.AnnAssign,
+)
+
+
+def strip_code_fences(raw: str) -> str:
+    """final_answer()に渡された文字列から前後の空白とmarkdownのコードフェンスを除く.
+
+    LLMはしばしばmarkdownのコードフェンス付きで提出する。採点側は提出文字列に
+    テスト行を連結して実行するため、フェンスが残っていると構文エラーになる。
+
+    Args:
+        raw (str): final_answer()が捕捉した生の文字列。
+
+    Returns:
+        str: 前後の空白とコードフェンスを除去した文字列。
+    """
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:]  # ```python 等の開始フェンスを落とす
+        while lines and lines[-1].strip().startswith("```"):
+            lines.pop()
+        text = "\n".join(lines).strip()
+    return text
+
+
+def mbpp_rejection(solution: str) -> str | None:
+    """MBPPの提出コードを受理してよいか検査し、だめな理由を返す.
+
+    採点側は提出コードに隠しテストを連結してファイル全体を実行し、exit 0のみを合格とする。
+    そのため「構文が通る」だけでは足りず、(1)関数定義がある (2)トップレベルに例外を
+    投げ得る文が無い (3)サンドボックス専用の名前を参照していない の3点を確かめる。
+
+    Args:
+        solution (str): サニタイズ済みの提出コード。
+
+    Returns:
+        str | None: 受理可能ならNone。不可なら理由の文字列。
+    """
+    if not solution:
+        return "final_answer() received an empty value"
+    try:
+        tree = ast.parse(solution)
+    except SyntaxError as error:
+        return f"the submitted code is not valid Python ({error.msg} on line {error.lineno})"
+
+    # サンドボックス専用名の検査を先に行う。検証ラッパーをそのまま提出した場合、
+    # 関数定義が文字列リテラルの中にあるため「関数定義なし」が先に当たってしまい、
+    # 本当の原因(ラッパーごと提出した)が伝わらない。
+    referenced = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    blocked = sorted(referenced & _SANDBOX_ONLY_NAMES)
+    if blocked:
+        return (
+            f"the submitted code calls {', '.join(blocked)}, which exist only inside this "
+            "sandbox. Submit just the function source, with no test harness around it"
+        )
+
+    if not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in tree.body):
+        return "the submitted code contains no function definition"
+
+    for node in tree.body:
+        if isinstance(node, _ALLOWED_TOP_LEVEL):
+            continue
+        # モジュールdocstringだけは例外を投げないので許す
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+                and isinstance(node.value.value, str):
+            continue
+        return (
+            f"the submitted code has a top-level {type(node).__name__} statement. Submit only "
+            "imports and the function definition(s): the grader appends its own tests to your "
+            "code and runs the whole file, so any extra statement that raises fails it"
+        )
+    return None
+
 # 1ステップで「実装 -> run_testsで検証 -> 合格なら即submit」まで到す手本。
 # 反復数 / 累積トークンを最小化するため、検証と提出を同じコードブロックで行う形を示す。
+
 _MBPP_FEW_SHOT_EXAMPLE = '''Thought: Implement the function, verify it with the given tests, submit if they pass.
 ```python
 solution = """def add(a, b):
@@ -26,6 +116,39 @@ Observation:
 class MBPPProfile(TaskProfile):
     """MBPP(単一の関数の実装課題)用のTaskProfileを定義するクラス."""
     name = "mbpp"
+
+    def sanitize_submission(self, raw: str) -> str:
+        """提出文字列からコードフェンスを除く.
+
+        Args:
+            raw (str): final_answer()が捕捉した生の文字列。
+
+        Returns:
+            str: 整えた提出コード。
+        """
+        return strip_code_fences(raw)
+
+    def submission_rejection(self, candidate: str) -> str | None:
+        """採点側の実行方式で例外を投げない関数ソースかを検査する.
+
+        Args:
+            candidate (str): 整えた提出コード。
+
+        Returns:
+            str | None: 受理できるならNone。だめなら理由。
+        """
+        return mbpp_rejection(candidate)
+
+    def is_fallback_candidate(self, code: str) -> bool:
+        """そのまま提出できる形(関数定義を含み、トップレベルに危険な文が無い)のコードかを返す.
+
+        Args:
+            code (str): その反復で実行したコード。
+
+        Returns:
+            bool: 打ち切り時の提出候補として残すならTrue。
+        """
+        return mbpp_rejection(code) is None
 
     def task_instructions(self) -> str:
         """MBPPタスクの進め方を返す.
