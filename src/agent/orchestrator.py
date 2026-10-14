@@ -14,7 +14,7 @@ from collections.abc import Callable
 from src.agent.extractor.code_extractor import CodeExtractor
 from src.agent.limits import LimitTracker, StopReason
 from src.agent.llm.provider.provider import LLMGenerator, LLMResponse, LLMError
-from src.agent.extractor.python_extractor import was_salvaged
+from src.agent.extractor.python_extractor import salvage_kind
 from src.agent.observation import budget_note, build_observation, malformed_code_note, observation_no_code
 from src.agent.llm.transport.transport import TransportError
 from src.agent.prompt.task_profile.task_profile import TaskProfile
@@ -175,8 +175,9 @@ class Orchestrator:
             result: ExecuteResult = self.sandbox.run(code)
             observation = build_observation(result)
             # 閉じフェンスが欠けたブロックを救済実行した場合は、その事実をLLMに明示する
-            if was_salvaged(response.text):
-                observation = f"{malformed_code_note()}\n{observation}"
+            salvaged = salvage_kind(response.text)
+            if salvaged is not None:
+                observation = f"{malformed_code_note(salvaged)}\n{observation}"
 
             # final_answer()が呼ばれていれば、提出物を検査する。
             # 採点側は提出コードに隠しテストを連結して実行するため、

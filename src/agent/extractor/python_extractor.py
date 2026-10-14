@@ -2,6 +2,7 @@
 
 LLM出力中の```python```フェンスブロックを抽出する具象クラス。
 """
+import ast
 import re
 
 from src.agent.extractor.code_extractor import CodeExtractor
@@ -23,19 +24,63 @@ _UNCLOSED_CODE_BLOCK_PATTERN = re.compile(
 )
 
 
-def was_salvaged(llm_output: str) -> bool:
-    """閉じフェンス無しのブロックを救済して抽出したかどうかを返す.
+# フェンスを一切書かず、素のPythonを本文に返すモデルがある
+# (実測: gpt-ossがタスク235のstep1で `final_answer("""def ...""")` をフェンス無しで出力し、
+#  抽出できず600トークンを丸損した)。行頭が明らかにコードの位置から末尾までを候補とし、
+# ast.parse()が通ったときだけ採用する(散文はほぼ構文エラーになるため誤爆しにくい)。
+_BARE_CODE_START_PATTERN = re.compile(
+    r"^[ \t]*(?:final_answer\(|print\(|def |class |import |from |[A-Za-z_]\w*\s*=[^=])",
+    re.MULTILINE,
+)
+# 救済したコードが「ただの名前や文字列」でないことを確かめるために要求するノード。
+_CODE_LIKE_NODES = (
+    ast.Call, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom,
+)
+
+SALVAGE_UNCLOSED_FENCE = "unclosed_fence"
+SALVAGE_UNFENCED = "unfenced"
+
+
+def _extract_bare_code(llm_output: str) -> str | None:
+    """フェンスの無い素のPythonコードを本文から救済する.
 
     Args:
         llm_output (str): LLMが生成した出力テキスト全体。
 
     Returns:
-        bool: 正規のブロックが無く、未閉鎖ブロックから拾った場合True。
+        str | None: 構文が通り、呼び出し/定義/importを含む候補。見つからなければNone。
+    """
+    for match in _BARE_CODE_START_PATTERN.finditer(llm_output):
+        candidate = llm_output[match.start():].strip()
+        if not candidate:
+            continue
+        try:
+            tree = ast.parse(candidate)
+        except SyntaxError:
+            continue
+        if any(isinstance(node, _CODE_LIKE_NODES) for node in ast.walk(tree)):
+            return candidate
+    return None
+
+
+def salvage_kind(llm_output: str) -> str | None:
+    """崩れた出力をどの方法で救済したかを返す.
+
+    Args:
+        llm_output (str): LLMが生成した出力テキスト全体。
+
+    Returns:
+        str | None: 正規のブロックがあればNone。未閉鎖フェンスから拾ったなら
+            SALVAGE_UNCLOSED_FENCE、フェンス無しの素のコードから拾ったなら SALVAGE_UNFENCED。
     """
     if _PYTHON_CODE_BLOCK_PATTERN.findall(llm_output):
-        return False
+        return None
     match = _UNCLOSED_CODE_BLOCK_PATTERN.search(llm_output)
-    return bool(match and match.group(1).strip())
+    if match and match.group(1).strip():
+        return SALVAGE_UNCLOSED_FENCE
+    if _extract_bare_code(llm_output) is not None:
+        return SALVAGE_UNFENCED
+    return None
 
 
 class PythonCodeExtractor(CodeExtractor):
@@ -63,4 +108,6 @@ class PythonCodeExtractor(CodeExtractor):
         match = _UNCLOSED_CODE_BLOCK_PATTERN.search(llm_output)
         if match and match.group(1).strip():
             return str(match.group(1).rstrip())
-        return None
+
+        # フェンスを一切書かず素のPythonを返した場合も救済する
+        return _extract_bare_code(llm_output)

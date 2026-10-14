@@ -1,7 +1,12 @@
 """PythonCodeExtractor の単体テスト."""
 import pytest
 
-from src.agent.extractor.python_extractor import PythonCodeExtractor
+from src.agent.extractor.python_extractor import (
+    SALVAGE_UNCLOSED_FENCE,
+    SALVAGE_UNFENCED,
+    PythonCodeExtractor,
+    salvage_kind,
+)
 
 
 @pytest.fixture
@@ -66,3 +71,34 @@ def test_nested_backticks_in_string(extractor: PythonCodeExtractor) -> None:
     """コード中の行頭でない ``` では閉じない(点1)."""
     text = "```python\ns = '```'\nprint(s)\n```"
     assert extractor.extract(text) == "s = '```'\nprint(s)"
+
+
+def test_unfenced_final_answer_is_salvaged(extractor: PythonCodeExtractor) -> None:
+    """フェンス無しで素のPythonを返した応答も救済して実行する.
+
+    実測(MBPPタスク235 step1)でgpt-ossが final_answer(三連引用符の関数ソース) をフェンス無しで
+    出力し、抽出できず1反復(600トークン)を丸損した。A13(崩れた形式の解釈)が要求する救済。
+    """
+    text = 'final_answer("""def f(n):\n    return n * 2\n""")'
+    assert extractor.extract(text) == text
+    assert salvage_kind(text) == SALVAGE_UNFENCED
+
+
+def test_unfenced_code_after_prose_is_salvaged(extractor: PythonCodeExtractor) -> None:
+    """地の文のあとにフェンス無しのコードが続く場合、コード部分から拾う."""
+    text = "Thought: just define it.\ndef f(n):\n    return n + 1\nprint(f(1))"
+    assert extractor.extract(text) == "def f(n):\n    return n + 1\nprint(f(1))"
+    assert salvage_kind(text) == SALVAGE_UNFENCED
+
+
+def test_prose_only_is_not_mistaken_for_code(extractor: PythonCodeExtractor) -> None:
+    """純粋な散文をコードと誤認しない(構文が通らないものは採用しない)."""
+    text = "I think the answer is 42 but I will not write any code block."
+    assert extractor.extract(text) is None
+    assert salvage_kind(text) is None
+
+
+def test_salvage_kind_distinguishes_unclosed_fence(extractor: PythonCodeExtractor) -> None:
+    """閉じフェンス欠落とフェンス無しを区別する(LLMに返す助言が異なるため)."""
+    assert salvage_kind("```python\nprint('x')\n") == SALVAGE_UNCLOSED_FENCE
+    assert salvage_kind("```python\nprint('x')\n```") is None

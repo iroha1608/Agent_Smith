@@ -5,6 +5,7 @@
 """
 from enum import Enum
 
+from src.agent.extractor.python_extractor import SALVAGE_UNCLOSED_FENCE, SALVAGE_UNFENCED
 from src.models.output import ExecuteResult
 
 
@@ -145,17 +146,29 @@ def budget_note(remaining_output_tokens: int) -> str:
     )
 
 
-def malformed_code_note() -> str:
-    """閉じフェンス無しのコードブロックを救済実行したことをLLMへ明示する一文を返す.
-
-    課題 V.1 は「崩れたコードブロックを解釈して実行したなら、それをLLMに説明する」ことを要求する。
-    黙って実行すると、LLMは自分の出力が途中で切れたことに気付かず同じ失敗を繰り返す。
-
-    Returns:
-        str: Observationの先頭に付ける説明文。
-    """
-    return (
+_MALFORMED_NOTES: dict[str, str] = {
+    SALVAGE_UNCLOSED_FENCE: (
         "[MALFORMED_CODE] Your ```python block was never closed, so your response was cut off "
         "by the per-turn output limit. I executed everything after the opening fence anyway. "
         "Write shorter turns so the block closes."
-    )
+    ),
+    SALVAGE_UNFENCED: (
+        "[MALFORMED_CODE] You wrote bare Python with no ```python fence. I detected it and "
+        "executed it anyway, but wrap your code in ```python ... ``` so it is read reliably."
+    ),
+}
+
+
+def malformed_code_note(kind: str) -> str:
+    """崩れたコードを救済実行したことをLLMへ明示する一文を返す.
+
+    課題 V.1 は「崩れたコードブロックを解釈して実行したなら、それをLLMに説明する」ことを要求する。
+    黙って実行すると、LLMは自分の出力が崩れていたことに気付かず同じ失敗を繰り返す。
+
+    Args:
+        kind (str): 救済の種類(python_extractorのSALVAGE_*定数)。
+
+    Returns:
+        str: Observationの先頭に付ける説明文。未知の種類なら空文字。
+    """
+    return _MALFORMED_NOTES.get(kind, "")
