@@ -45,6 +45,7 @@ class Orchestrator:
         limits: Limits,
         stop_sequence: list[str] | None = None,
         solution_verifier: Callable[[str], tuple[bool, str]] | None = None,
+        started_at: float | None = None,
     ) -> None:
         """依存部品を注入してOrchestratorを初期化する.
 
@@ -57,6 +58,7 @@ class Orchestrator:
             stop_sequence (list[str] | None): 生成停止文字列。Noneなら既定の ["<end_code>"]。
             solution_verifier (Callable[[str], tuple[bool, str]] | None): 提出コードを受理前に
                 検証する関数。(合否, 詳細)を返す。Noneなら構文検査のみで受理する。
+            started_at (float | None): 制限時間の起点(time.monotonic()の値)。Noneならrun()の開始時。
         """
         self.provider = provider
         self.extractor = extractor
@@ -67,6 +69,7 @@ class Orchestrator:
         self.solution_verifier = solution_verifier
         # 入力トークン見積もりの係数。実測に合わせて安全側(小さい側)へだけ補正する。
         self._chars_per_token = self._CHARS_PER_TOKEN
+        self.started_at = started_at
 
     def run(self, task_id: str, benchmark: str, task_message: str) -> SolutionOutput:
         """1タスク分のループを回しSolutionOutputを生成する.
@@ -89,7 +92,7 @@ class Orchestrator:
         ]
 
         # ループ前の下準備
-        tracker = LimitTracker(self.limits)
+        tracker = LimitTracker(self.limits, start_time=self.started_at)
         steps: list[StepMetrics] = []
         best_solution: str = ""
         # 実行したコード(空白を正規化) -> 最初に実行したstep番号。同じコードの再実行を指摘する。

@@ -8,6 +8,9 @@ fireはagent_mbpp.py / agent_swebench.py から呼ばれ、
 
 - [ ] BaseAgentCliArgsモデルを作成して検証を拡充
 """
+import logging
+import shlex
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -22,9 +25,14 @@ from src.agent.orchestrator import Orchestrator
 from src.agent.prompt.task_profile.mbpp_profile import MBPPProfile
 from src.config.settings import load_providers, load_settings, order_providers
 from src.models.input import MBPPTaskInput
+from src.models.output import SolutionOutput
 from src.sandbox.sandbox_main import Sandbox
 from src.models.sandbox_config import SandboxConfig
 # from src.sandbox.mock import MockSandbox
+
+_LOGGER = logging.getLogger("agent.cli")
+# リポジトリ直下(このファイルは src/agent/cli.py)
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def format_mbpp_task(task_input: MBPPTaskInput) -> str:
@@ -93,30 +101,77 @@ def run_mbpp_agent(
     provider_url: str | None = None,
     providers_file_path: str = "providers/providers.json"
 ) -> None:
-    """MBPPタスクを1問解くエージェントを実行し、SolutionOutputを書き出す.
+    """MBPPタスクを1問解くエージェントを実行し、SolutionOutputを必ず書き出す.
+
+    課題 IV.1「評価中のクラッシュは失格」のため、想定外の例外が起きても
+    success=False と原因を入れた solution.json を書いて正常終了する
+    (KeyboardInterrupt / SystemExit は握りつぶさずに伝える)。
 
     Args:
         task_file_path (str): MBPPタスクファイルのパス
         output_file_path (str): SolutionOutputを書き出すJSONファイルのパス
         model_name (str | None): 使用するLLMモデル名。Noneなら設定ファイルのデフォルトを使用
         provider_url (str | None): 使用するLLMプロバイダのURL。Noneなら設定ファイルのデフォルトを使用
+        providers_file_path (str): プロバイダ設定ファイルのパス
     """
-    # タスクファイル読み込み
-    task_input = MBPPTaskInput.model_validate_json(
-        Path(task_file_path).read_text(encoding="utf-8")
-    )
+    # 採点側の制限時間はプロセス起動から数えるので、できるだけ早く起点を取る
+    started_at = time.monotonic()
+    task_id = "unknown"
+    try:
+        task_input = MBPPTaskInput.model_validate_json(
+            Path(task_file_path).read_text(encoding="utf-8")
+        )
+        task_id = str(task_input.task_id)
+        solution_output = _solve_mbpp(task_input, started_at, model_name, provider_url, providers_file_path)
+    except Exception as error:  # noqa: BLE001 - 評価中は落ちずに失敗を記録して返す
+        _LOGGER.exception("agent crashed; writing a failed solution.json")
+        solution_output = SolutionOutput(
+            task_id=task_id,
+            benchmark="mbpp",
+            success=False,
+            solution="",
+            iterations=0,
+            total_requests=0,
+            total_input_tokens=0,
+            total_output_tokens=0,
+            total_time_seconds=time.monotonic() - started_at,
+            error=f"AGENT_CRASH: {type(error).__name__}: {error}"[:500],
+        )
+    output_path = Path(output_file_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(solution_output.model_dump_json(indent=2), encoding="utf-8")
 
+
+def _solve_mbpp(
+    task_input: MBPPTaskInput,
+    started_at: float,
+    model_name: str | None,
+    provider_url: str | None,
+    providers_file_path: str,
+) -> SolutionOutput:
+    """設定・プロバイダ・サンドボックスを組み立て、1問を解いてSolutionOutputを返す.
+
+    Args:
+        task_input (MBPPTaskInput): 読み込んだタスク。
+        started_at (float): プロセス起動直後の time.monotonic()。
+        model_name (str | None): CLIで指定されたモデル名。
+        provider_url (str | None): CLIで指定されたプロバイダURL。
+        providers_file_path (str): プロバイダ設定ファイルのパス。
+
+    Returns:
+        SolutionOutput: エージェントの実行結果。
+    """
     # 設定読み込み
     settings = load_settings()
-    # .envから環境変数を読み込む
+    # .envから環境変数を読み込む(既に環境変数にあるキーは上書きしない)
     load_dotenv()
 
     # CLIで指定されたモデル / URLのプロバイダを先頭に、残りをフォールバックとして並べる
     providers = order_providers(load_providers(providers_file_path), model_name, provider_url)
 
-    # 時間制限を使い果たさないようにデッドラインを計算
-    # バックオフ待機はこの残予算にクランプされる
-    dead_line = time.monotonic() + settings.limits.total_time_sec - settings.limits.time_margin_sec
+    # 時間制限を使い果たさないようにデッドラインを計算(起点はプロセス起動時)
+    # バックオフ待機とHTTPタイムアウトはこの残予算にクランプされる
+    dead_line = started_at + settings.limits.total_time_sec - settings.limits.time_margin_sec
     client = ResilientLLMClient(
         providers=providers,
         transport=RequestsTransport(),
@@ -124,14 +179,15 @@ def run_mbpp_agent(
         time_remaining=lambda: max(0, dead_line - time.monotonic()),
     )
 
-    # Sandbox構築
+    # Sandbox構築。MCPサーバーは実行中のPythonで、リポジトリ直下のファイルを起動する
+    # (カレントディレクトリやPATH上のpythonに依存しない)
     sandbox_config = SandboxConfig(
         max_execution_time_seconds=int(settings.sandbox.exec_timeout_sec),
         max_memory_mb=settings.sandbox.memory_limit_mb
     )
     with Sandbox(
         config=sandbox_config,
-        mcp_stdio="python mcp_tools_mbpp.py"
+        mcp_stdio=f"{shlex.quote(sys.executable)} {shlex.quote(str(_REPO_ROOT / 'mcp_tools_mbpp.py'))}"
     ) as sandbox:
 
         # Provider(ResilientLLMClient) / Sandbox / Orchestrator 構築
@@ -141,12 +197,11 @@ def run_mbpp_agent(
             sandbox=sandbox,
             profile=MBPPProfile(),
             limits=settings.limits,
-            solution_verifier=make_mbpp_verifier(sandbox, [*task_input.test_imports, *task_input.test_list])
+            solution_verifier=make_mbpp_verifier(sandbox, [*task_input.test_imports, *task_input.test_list]),
+            started_at=started_at,
         )
 
-        # 実行 -> SolutionOutput 書き出し
-        solution_output = orchestrator.run(
+        # 実行
+        return orchestrator.run(
             str(task_input.task_id), "mbpp", format_mbpp_task(task_input)
         )
-    solution_output_path = Path(output_file_path)
-    solution_output_path.write_text(solution_output.model_dump_json(indent=2), encoding="utf-8")
