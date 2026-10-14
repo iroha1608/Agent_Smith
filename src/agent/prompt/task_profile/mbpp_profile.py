@@ -34,20 +34,16 @@ class MBPPProfile(TaskProfile):
             str: タスクの指示
         """
         return (
-            "This is an MBPP task: implement ONE Python function with the exact name and signature "
-            "given by the task's function signature.\n"
-            "- Build the full source as a string in a variable (triple-quoted), then verify it with "
-            "run_tests(code=..., test_list=[...]) using the asserts from the task message.\n"
-            "- As soon as run_tests reports success, call final_answer(<that same string>) in the "
-            "SAME code block. Do not spend another turn.\n"
-            "- The submitted string must contain ONLY imports plus the function (and any helper "
-            "functions it needs). No prints, no asserts, no example calls: the grader appends its "
-            "own test lines to your code and runs the file, so any extra statement that raises "
-            "makes the whole submission fail.\n"
-            "- HIDDEN TESTS: you are shown only part of the test suite. Write a general, correct "
-            "implementation that handles edge cases; never hardcode the shown expected values.\n"
-            "- If run_tests fails, read its output, fix the implementation and try again. "
-            "Keep each turn small: iterations, tokens and time are strictly limited."
+            "MBPP: implement ONE function with the exact name and signature given by the task.\n"
+            "- Build its source as a triple-quoted string, verify it with "
+            "run_tests(code=..., test_list=[...]) using the task's asserts, and when it passes call "
+            "final_answer(<that string>) in the SAME block.\n"
+            "- The submitted string must contain ONLY imports and the function(s). No prints, "
+            "asserts or demo calls: the grader appends its own tests to your code and runs it, so "
+            "any extra statement that raises fails the submission.\n"
+            "- HIDDEN TESTS: you see only part of the suite. Write a general, correct "
+            "implementation; never hardcode the shown values.\n"
+            "- If run_tests fails, read the output, fix the code, retry."
         )
 
     def final_answer_specification(self) -> str:

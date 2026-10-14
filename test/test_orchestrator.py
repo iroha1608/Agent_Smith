@@ -8,6 +8,7 @@ from src.config.settings import Limits
 from src.sandbox.mock import MockSandbox
 
 _RESP_PRINT = "Thought: test it.\n```python\nprint('hello')\n```\n<end_code>"
+_RESP_DEF = "Thought: draft it.\n```python\ndef f():\n    return 1\n```\n<end_code>"
 _RESP_FINAL = "Thought: submit.\n```python\nfinal_answer('def f():\\n    return 1')\n```\n<end_code>"
 _RESP_NO_CODE = "I think the answer is 42 but I will not write any code block."
 _RESP_ENDCODE_INSIDE = "Thought: oops.\n```python\nprint('x')<end_code>\n```"
@@ -74,12 +75,24 @@ def test_no_code_then_success() -> None:
 
 
 def test_limit_stop_max_iterations() -> None:
-    """final_answer を出さないと max_iterations で打切り(best-so-far を提出)."""
-    solution = _orchestrator([_RESP_PRINT, _RESP_PRINT], max_iterations=2).run("82", "mbpp", "task")
+    """final_answer を出さないと max_iterations で打切り(提出可能な best-so-far を提出)."""
+    solution = _orchestrator([_RESP_DEF, _RESP_DEF], max_iterations=2).run("82", "mbpp", "task")
     assert solution.success is False
     assert solution.error == "MAX_ITERATIONS"
     assert solution.iterations == 2
-    assert solution.solution == "print('hello')"
+    assert solution.solution == "def f():\n    return 1"
+
+
+def test_fallback_skips_non_submittable_code() -> None:
+    """打切り時のフォールバックに、関数定義を含まない作業コードは採用しない.
+
+    採点側は提出コードにテスト行を連結して実行するため、printだけの断片を提出すると
+    「関数が無い」で確実に不合格になる。空で返す方が誤提出より正しい。
+    """
+    solution = _orchestrator([_RESP_PRINT, _RESP_PRINT], max_iterations=2).run("82", "mbpp", "task")
+    assert solution.success is False
+    assert solution.error == "MAX_ITERATIONS"
+    assert solution.solution == ""
 
 
 def test_endcode_inside_block_is_stripped() -> None:

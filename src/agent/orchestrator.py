@@ -11,7 +11,7 @@ LimitTrackerの先頭ガード -> LLM生成 -> <end_code>除去 -> コード抽�
 from collections.abc import Callable
 
 from src.agent.extractor.code_extractor import CodeExtractor
-from src.agent.limits import LimitTracker
+from src.agent.limits import LimitTracker, StopReason
 from src.agent.llm.provider.provider import LLMGenerator, LLMResponse, LLMError
 from src.agent.extractor.python_extractor import was_salvaged
 from src.agent.observation import build_observation, malformed_code_note, observation_no_code
@@ -100,6 +100,25 @@ class Orchestrator:
                     error=stop_reason.value
                 )
 
+            # 送る履歴を決め、累積入力トークンの上限を踏み越えないか事前に確かめる。
+            # LimitTrackerの判定は「送信前の実績」しか見ないため、1回の送信で上限を
+            # 飛び越えられる(実測で6885/6000)。踏み越えると即不合格なので、
+            # まず窓を最小化し、それでも収まらないならリクエストせずに打ち切る。
+            windowed = self._window_messages(messages)
+            if tracker.total_input_tokens + self._estimate_tokens(windowed) > self.limits.max_input_tokens:
+                windowed = windowed[:2]
+            if tracker.total_input_tokens + self._estimate_tokens(windowed) > self.limits.max_input_tokens:
+                return self._build_solution(
+                    task_id=task_id,
+                    benchmark=benchmark,
+                    success=False,
+                    solution=best_solution,
+                    tracker=tracker,
+                    steps=steps,
+                    system_prompt=system_prompt,
+                    error=StopReason.MAX_INPUT_TOKENS.value
+                )
+
             # LLMにリクエストを送信し、レスポンスを取得する
             max_tokens = min(
                 self.limits.max_output_tokens_per_iteration,
@@ -107,7 +126,7 @@ class Orchestrator:
             )
             try:
                 response: LLMResponse = self.provider.generate(
-                    messages=self._window_messages(messages),
+                    messages=windowed,
                     stop_sequences=self.stop_sequences,
                     max_tokens=max_tokens
                 )
@@ -175,8 +194,9 @@ class Orchestrator:
                         f"{observation}\n--- submission rejected ---\n{rejection}\n"
                         "Fix the solution string and call final_answer again."
                     )
-            elif result.error is None:
-                # 提出前の作業コードは、打ち切り時のフォールバック候補として残す。
+            elif result.error is None and self._reject_reason(code) is None:
+                # 打ち切り時のフォールバック候補。提出可能な形(構文が通り関数定義を含む)の
+                # コードだけを残す。デバッグ用のprintだけの断片を出すと確実に不合格になる。
                 best_solution = code
 
             messages.append(
@@ -202,6 +222,29 @@ class Orchestrator:
     # 送信履歴の窓(直近N往復)と1メッセージの最大文字数。累積入力トークンを抑えるための切り詰め設定。
     _HISTORY_WINDOW = 2
     _OBS_MAX_CHARS = 800
+    # 履歴として再送するassistant発話の上限。自分が書いたコード全文を毎回送り直すと
+    # 反復2回目以降の入力が一気に膨らみ、累積入力の上限(6000)を食い潰す。
+    _ASSISTANT_MAX_CHARS = 1200
+    # トークン概算の係数(実測: 英文+コードで1トークン≒3.9文字)。
+    # 事前ガードで使うため、安全側に小さめの値で割って多めに見積もる。
+    _CHARS_PER_TOKEN = 3.6
+
+    @classmethod
+    def _estimate_tokens(cls, messages: list[dict[str, str]]) -> int:
+        """これから送るメッセージ列の入力トークン数を概算する.
+
+        ハード制限(累積入力トークン)を踏み越えないための事前ガードに使う。
+        踏み越えるとその時点でタスクが不合格になるため、安全側に多めへ見積もる。
+
+        Args:
+            messages (list[dict[str, str]]): 送信予定のメッセージ列。
+
+        Returns:
+            int: 概算の入力トークン数。
+        """
+        characters = sum(len(message["content"]) for message in messages)
+        # メッセージごとのrole等のオーバーヘッドを4トークンずつ加算する
+        return int(characters / cls._CHARS_PER_TOKEN) + 4 * len(messages)
 
     @staticmethod
     def _sanitize_solution(raw: str) -> str:
@@ -252,7 +295,8 @@ class Orchestrator:
         Chat Completions はステートレスで毎回全履歴を送るため、反復が増えると累積入力が
         ハード上限(max_input_tokens)を食い潰す。system と最初のタスク文は常に残し、
         それ以降は直近 _HISTORY_WINDOW 往復(assistant+user)だけを再送する。
-        長い Observation(role=user)は _OBS_MAX_CHARS で切り詰める(assistantのコードは保持)。
+        長い Observation(role=user)は _OBS_MAX_CHARS、再送するassistant発話は
+        _ASSISTANT_MAX_CHARS で切り詰める(自分の書いたコード全文の再送が最大の膨張要因)。
 
         Args:
             messages (list[dict[str, str]]): [system, user(task), (assistant, user)...] の全履歴。
@@ -265,11 +309,13 @@ class Orchestrator:
         if len(tail) > Orchestrator._HISTORY_WINDOW * 2:
             tail = tail[-Orchestrator._HISTORY_WINDOW * 2:]
 
+        limits = {"user": Orchestrator._OBS_MAX_CHARS, "assistant": Orchestrator._ASSISTANT_MAX_CHARS}
         trimmed: list[dict[str, str]] = []
         for message in tail:
             content = message["content"]
-            if message["role"] == "user" and len(content) > Orchestrator._OBS_MAX_CHARS:
-                content = content[:Orchestrator._OBS_MAX_CHARS] + "\n...[truncated]"
+            budget = limits.get(message["role"])
+            if budget is not None and len(content) > budget:
+                content = content[:budget] + "\n...[truncated]"
             trimmed.append({"role": message["role"], "content": content})
         return head + trimmed
 

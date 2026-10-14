@@ -1,0 +1,2 @@
+[harness] providers=tools/providers_mbpp.json workers=1 run=/home/iroha/42Tokyo/cursus/Mile5/Agent_Smith_Project/My_AgentSmith/evaluations/mbpp/2026-10-14_13-01-32
+[harness] selected 50 tasks
