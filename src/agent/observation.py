@@ -5,7 +5,11 @@
 """
 from enum import Enum
 
-from src.agent.extractor.python_extractor import SALVAGE_UNCLOSED_FENCE, SALVAGE_UNFENCED
+from src.agent.extractor.python_extractor import (
+    SALVAGE_ESCAPED_QUOTES,
+    SALVAGE_UNCLOSED_FENCE,
+    SALVAGE_UNFENCED,
+)
 from src.models.output import ExecuteResult
 
 
@@ -155,6 +159,12 @@ _MALFORMED_NOTES: dict[str, str] = {
     SALVAGE_UNFENCED: (
         "[MALFORMED_CODE] You wrote bare Python with no ```python fence. I detected it and "
         "executed it anyway, but wrap your code in ```python ... ``` so it is read reliably."
+    ),
+    SALVAGE_ESCAPED_QUOTES: (
+        "[MALFORMED_CODE] You backslash-escaped quotes outside a string literal (for example "
+        'if report[\\"success\\"]: instead of if report["success"]:). That is a SyntaxError. '
+        "I unescaped the broken lines and ran your code. Write plain Python quotes: this is a "
+        "code block, not a JSON string."
     ),
 }
 

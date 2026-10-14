@@ -39,6 +39,80 @@ _CODE_LIKE_NODES = (
 
 SALVAGE_UNCLOSED_FENCE = "unclosed_fence"
 SALVAGE_UNFENCED = "unfenced"
+SALVAGE_ESCAPED_QUOTES = "escaped_quotes"
+
+# JSON形式のツール呼び出しで学習したモデルは、コードブロック全体をJSON文字列のように
+# エスケープして返すことがある。実測(gpt-oss, MBPPタスク305): few-shotの
+# `if report["success"]:` を `if report[\"success\"]:` と書き、文字列の外のバックスラッシュで
+# SyntaxError(unexpected character after line continuation character)になり4反復を溶かした。
+# 三連引用符の中の \" は正当なので一括置換はできない。構文エラーが出た行だけを戻す。
+_MAX_UNESCAPE_PASSES = 30
+
+
+def _repair_escaped_quotes(code: str) -> str | None:
+    """構文エラーの行に限ってクォートのエスケープを戻し、構文が通る形を探す.
+
+    Args:
+        code (str): 抽出したコード。
+
+    Returns:
+        str | None: 修復できたコード。もともと構文が通る場合や修復できない場合はNone。
+    """
+    try:
+        ast.parse(code)
+        return None
+    except SyntaxError:
+        pass
+
+    lines = code.splitlines()
+    for _ in range(_MAX_UNESCAPE_PASSES):
+        try:
+            ast.parse("\n".join(lines))
+            return "\n".join(lines)
+        except SyntaxError as error:
+            index = (error.lineno or 0) - 1
+            if not 0 <= index < len(lines):
+                return None
+            repaired = lines[index].replace('\\"', '"').replace("\\'", "'")
+            if repaired == lines[index]:
+                return None  # その行にエスケープが無い = 別の原因の構文エラー
+            lines[index] = repaired
+    return None
+
+
+def _extract_with_kind(llm_output: str) -> tuple[str | None, str | None]:
+    """コードを抽出し、崩れを救済した場合はその種類も返す.
+
+    Args:
+        llm_output (str): LLMが生成した出力テキスト全体。
+
+    Returns:
+        tuple[str | None, str | None]: (抽出したコード, 救済の種類)。
+            抽出できなければ(None, None)。正規のブロックをそのまま使えたなら種類はNone。
+    """
+    blocks = _PYTHON_CODE_BLOCK_PATTERN.findall(llm_output)
+    kind: str | None = None
+    code: str | None = None
+    if blocks:
+        # 複数ある場合は最後のブロックを使う
+        code = str(blocks[-1].rstrip())
+    else:
+        match = _UNCLOSED_CODE_BLOCK_PATTERN.search(llm_output)
+        if match and match.group(1).strip():
+            code = str(match.group(1).rstrip())
+            kind = SALVAGE_UNCLOSED_FENCE
+        else:
+            code = _extract_bare_code(llm_output)
+            if code is not None:
+                kind = SALVAGE_UNFENCED
+    if code is None:
+        return None, None
+
+    # 過剰エスケープは実行自体を止めてしまうので、他の救済より優先して報告する
+    repaired = _repair_escaped_quotes(code)
+    if repaired is not None:
+        return repaired, SALVAGE_ESCAPED_QUOTES
+    return code, kind
 
 
 def _extract_bare_code(llm_output: str) -> str | None:
@@ -70,17 +144,9 @@ def salvage_kind(llm_output: str) -> str | None:
         llm_output (str): LLMが生成した出力テキスト全体。
 
     Returns:
-        str | None: 正規のブロックがあればNone。未閉鎖フェンスから拾ったなら
-            SALVAGE_UNCLOSED_FENCE、フェンス無しの素のコードから拾ったなら SALVAGE_UNFENCED。
+        str | None: そのまま使えたならNone。救済した場合は SALVAGE_* のいずれか。
     """
-    if _PYTHON_CODE_BLOCK_PATTERN.findall(llm_output):
-        return None
-    match = _UNCLOSED_CODE_BLOCK_PATTERN.search(llm_output)
-    if match and match.group(1).strip():
-        return SALVAGE_UNCLOSED_FENCE
-    if _extract_bare_code(llm_output) is not None:
-        return SALVAGE_UNFENCED
-    return None
+    return _extract_with_kind(llm_output)[1]
 
 
 class PythonCodeExtractor(CodeExtractor):
@@ -98,16 +164,4 @@ class PythonCodeExtractor(CodeExtractor):
             str | None: 抽出されたコード
             または抽出できなかった場合(コードブロックが見つからない)はNone
         """
-        # テキスト全体からPythonコードブロックを抽出
-        code_blocks = _PYTHON_CODE_BLOCK_PATTERN.findall(llm_output)
-        if code_blocks:
-            # 末尾の改行を削除し最後のコードブロックを返す
-            return str(code_blocks[-1].rstrip())
-
-        # 正規のブロックが無い場合は、閉じフェンスが欠けたブロックを救済する
-        match = _UNCLOSED_CODE_BLOCK_PATTERN.search(llm_output)
-        if match and match.group(1).strip():
-            return str(match.group(1).rstrip())
-
-        # フェンスを一切書かず素のPythonを返した場合も救済する
-        return _extract_bare_code(llm_output)
+        return _extract_with_kind(llm_output)[0]

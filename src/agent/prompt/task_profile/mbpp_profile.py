@@ -10,9 +10,9 @@ solution = """def add(a, b):
     return a + b
 """
 import json
-report = json.loads(run_tests(code=solution, test_list=["assert add(2, 3) == 5"]))
+report = json.loads(run_tests(code=solution, test_list=['assert add(2, 3) == 5']))
 print(report)
-if report["success"]:
+if report['success']:
     final_answer(solution)
 ```
 <end_code>

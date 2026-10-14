@@ -2,6 +2,7 @@
 import pytest
 
 from src.agent.extractor.python_extractor import (
+    SALVAGE_ESCAPED_QUOTES,
     SALVAGE_UNCLOSED_FENCE,
     SALVAGE_UNFENCED,
     PythonCodeExtractor,
@@ -102,3 +103,37 @@ def test_salvage_kind_distinguishes_unclosed_fence(extractor: PythonCodeExtracto
     """閉じフェンス欠落とフェンス無しを区別する(LLMに返す助言が異なるため)."""
     assert salvage_kind("```python\nprint('x')\n") == SALVAGE_UNCLOSED_FENCE
     assert salvage_kind("```python\nprint('x')\n```") is None
+
+
+def test_escaped_quotes_outside_string_are_repaired(extractor: PythonCodeExtractor) -> None:
+    """文字列の外のクォートのエスケープを戻して実行可能にする.
+
+    実測(MBPPタスク305)でgpt-ossがfew-shotの if report["success"]: を
+    if report[\"success\"]: と書き、SyntaxErrorで4反復(1500トークン)を溶かした。
+    """
+    text = '```python\nreport = {"success": True}\nif report[\\"success\\"]:\n    print(1)\n```'
+    code = extractor.extract(text)
+    assert code is not None
+    compile(code, "<test>", "exec")           # 構文が通る形に直っている
+    assert 'report["success"]' in code
+    assert salvage_kind(text) == SALVAGE_ESCAPED_QUOTES
+
+
+def test_repair_keeps_legitimate_escapes_inside_triple_quotes(extractor: PythonCodeExtractor) -> None:
+    """三連引用符の中の \\" は正当なので壊さない(一括置換してはいけない)."""
+    inner = 'solution = """def f():\n    \\"\\"\\"doc.\\"\\"\\"\n    return 1\n"""'
+    text = f"```python\n{inner}\nif True:\n    print(solution)\n```"
+    code = extractor.extract(text)
+    assert code is not None
+    compile(code, "<test>", "exec")
+    namespace: dict[str, object] = {}
+    exec(code, namespace)                      # 実行しても docstring が壊れていない
+    assert '"""doc."""' in str(namespace["solution"])
+    assert salvage_kind(text) is None          # もともと構文が通るので救済扱いにしない
+
+
+def test_valid_code_is_left_untouched(extractor: PythonCodeExtractor) -> None:
+    """構文が通るコードには一切手を入れない."""
+    text = '```python\nprint("a\\"b")\n```'
+    assert extractor.extract(text) == 'print("a\\"b")'
+    assert salvage_kind(text) is None
