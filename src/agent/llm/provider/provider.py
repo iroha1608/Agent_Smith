@@ -30,6 +30,11 @@ class ProviderConfig(BaseModel):
         priority (int): プロバイダのフォールバック優先度。小さいほど優先度が高い。
         request_timeout_sec (float): HTTPリクエストのタイムアウト秒数。デフォルト60秒。MBPPの120秒にあわせる。
         additional_params (dict[str, Any]): プロバイダ固有のbodyに足す追加パラメータ。必要に応じて使用する。
+        model_params (dict[str, dict[str, Any]]): モデル名 -> そのモデルにだけ足すbodyパラメータ。
+            additional_paramsの後に適用するため、同じキーがあればこちらが優先する。
+            同じプロバイダでもモデルによって必要な設定が逆になることがあるため分けている。
+            実測(groq): gpt-oss系は reasoning_effort を指定しないと本文がreasoningチャンネルへ流れて
+            contentが空になり、コードブロックに到達できない。一方qwenは指定するとcontentが空になる。
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -40,6 +45,7 @@ class ProviderConfig(BaseModel):
     priority: int = 1
     request_timeout_sec: float = 60.0
     additional_params: dict[str, Any] = {}
+    model_params: dict[str, dict[str, Any]] = {}
 
 
 class LLMResponse(BaseModel):

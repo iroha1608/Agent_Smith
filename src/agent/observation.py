@@ -60,13 +60,14 @@ def collect_statuses(result: ExecuteResult) -> list[Status]:
     return statuses
 
 
-def _render_observation(statuses: list[Status], stdout: str, detail: str) -> str:
+def _render_observation(statuses: list[Status], stdout: str, detail: str, extra_note: str = "") -> str:
     """ラベル、stdout、詳細からObservation文字列を構築する.
 
     Args:
         statuses (list[Status]): Observationに付与するステータスラベルのリスト。
         stdout (str): sandbox.run()の標準出力。(空ならno output)
         detail (str): sandbox.run()の標準エラーまたは例外トレースバック。
+        extra_note (str): ステータス固定文の後ろに足す追加の助言。空なら足さない。
 
     Returns:
         str: 構築したObservation文字列。
@@ -78,6 +79,8 @@ def _render_observation(statuses: list[Status], stdout: str, detail: str) -> str
         lines.append("--- stderr / traceback ---")
         lines.append(detail)
     notes = [_NOTE[status] for status in statuses if status in _NOTE]
+    if extra_note:
+        notes.append(extra_note)
     if notes:
         lines.append("--- note ---")
         lines.append(" ".join(notes))
@@ -98,14 +101,48 @@ def build_observation(result: ExecuteResult) -> str:
     return _render_observation(statuses, stdout=result.stdout, detail=result.error or result.stderr)
 
 
-def observation_no_code() -> str:
+# 「散文で考え込んで出力上限に達し、コードフェンスへ到達しなかった」場合の助言。
+# 実測(MBPPタスク264)では3反復すべてがこれで、累積出力1500を使い切って不合格になった。
+# 原因(prose)と対処(コードで試して観測に判定させる)を名指ししないと同じ失敗を繰り返す。
+_CUT_OFF_NOTE = (
+    "Your reply spent its whole {spent}-token allowance on prose and was cut off before any "
+    "```python fence, so nothing ran. Do NOT derive formulas or trace arithmetic in words: "
+    "write a candidate implementation in code and let run_tests tell you if it is right."
+)
+
+
+def observation_no_code(cut_off_at: int | None = None) -> str:
     """LLMに返すObservation文字列を構築する（コードがない場合）.
+
+    Args:
+        cut_off_at (int | None): 1反復の出力上限に達して応答が切れた場合、その消費トークン数。
+            自然に書き終えた(＝単にコードを書かなかった)場合はNone。
 
     Returns:
         str: LLMに返すObservation文字列。
             [NO_CODE] No executable Python code block was found in your message. \n\n --- note ---
     """
-    return _render_observation([Status.NO_CODE], stdout="", detail="")
+    extra_note = "" if cut_off_at is None else _CUT_OFF_NOTE.format(spent=cut_off_at)
+    return _render_observation([Status.NO_CODE], stdout="", detail="", extra_note=extra_note)
+
+
+def budget_note(remaining_output_tokens: int) -> str:
+    """残り出力トークンが乏しいことを伝え、即時提出を促す一文を返す.
+
+    予算切れでの打ち切りは不合格が確定するため、残りを使って「現時点の最善」を
+    提出させる方が期待値が高い。
+
+    Args:
+        remaining_output_tokens (int): このタスクに残っている累積出力トークン数。
+
+    Returns:
+        str: Observationの末尾に付ける警告文。
+    """
+    return (
+        f"[BUDGET] Only {remaining_output_tokens} output tokens remain for this whole task. "
+        "Submit now: one short Thought line, then a code block that calls final_answer() with "
+        "your best implementation."
+    )
 
 
 def malformed_code_note() -> str:

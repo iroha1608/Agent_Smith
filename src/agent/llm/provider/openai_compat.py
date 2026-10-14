@@ -36,6 +36,9 @@ class OpenAICompatProvider(LLMProvider):
             payload["stop"] = stop_sequences
 
         payload.update(self.config.additional_params)
+        # モデル単位の設定はプロバイダ単位の設定より後に適用して上書きさせる
+        # (同一プロバイダでもモデルによって必要な設定が逆になることがある)。
+        payload.update(self.config.model_params.get(self.model, {}))
 
         return url, headers, json.dumps(payload)
 

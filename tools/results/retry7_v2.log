@@ -1,0 +1,4 @@
+[harness] providers=tools/providers_mbpp.json workers=1 run=/home/iroha/42Tokyo/cursus/Mile5/Agent_Smith_Project/My_AgentSmith/evaluations/mbpp/2026-10-14_14-04-32
+[harness] selected 7 tasks
+     264: PASS  iter=1 in=944 out=388 err=None (PASSED)
+     462: PASS  iter=3 in=5771 out=1038 err=None (PASSED)

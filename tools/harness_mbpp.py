@@ -47,11 +47,18 @@ def _run(cmd: list[str], timeout: int | None = None) -> subprocess.CompletedProc
     return subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=timeout)
 
 
-def _select(moulinette: str, count: int, seed: int, run_root: Path) -> list[tuple[str, Path]]:
-    """moulinette dump を連番seedで回し、重複しないcount個のタスクを選ぶ."""
+def _select(moulinette: str, count: int, seed: int, run_root: Path,
+            task_ids: tuple[str, ...] = ()) -> list[tuple[str, Path]]:
+    """moulinette dump を連番seedで回し、重複しないcount個のタスクを選ぶ.
+
+    task_idsを渡した場合は、それらが揃うまでseedを回して該当タスクだけを選ぶ
+    (前回落ちたタスクの再測に使う)。
+    """
     selected: dict[str, Path] = {}
+    wanted = set(task_ids)
+    target = len(wanted) if wanted else count
     offset = 0
-    while len(selected) < count and offset < count * 50:
+    while len(selected) < target and offset < target * 200:
         current = seed + offset
         offset += 1
         tmp = run_root / f"_seed{current}.json"
@@ -59,7 +66,7 @@ def _select(moulinette: str, count: int, seed: int, run_root: Path) -> list[tupl
         if completed.returncode != 0 or not tmp.exists():
             continue
         task_id = str(json.loads(tmp.read_text())["task_id"])
-        if task_id in selected:
+        if task_id in selected or (wanted and task_id not in wanted):
             tmp.unlink(missing_ok=True)
             continue
         task_dir = run_root / task_id
@@ -67,8 +74,8 @@ def _select(moulinette: str, count: int, seed: int, run_root: Path) -> list[tupl
         task_path = task_dir / "task.json"
         tmp.rename(task_path)
         selected[task_id] = task_path
-    if len(selected) < count:
-        raise SystemExit(f"only {len(selected)}/{count} tasks selected")
+    if len(selected) < target:
+        raise SystemExit(f"only {len(selected)}/{target} tasks selected")
     return list(selected.items())
 
 
@@ -116,7 +123,7 @@ def _solve(moulinette: str, task_id: str, task_path: Path, providers_file: str |
 
 
 def main(count: int = 5, seed: int = 1, eval_type: str = "mbpp", providers_file: str | None = None,
-         workers: int = 1, tpm_budget: int = 7000,
+         workers: int = 1, tpm_budget: int = 7000, task_ids: str | tuple[str, ...] = "",
          moulinette: str = _DEFAULT_MOULINETTE_PATH) -> None:
     """ハーネスを実行し、PASS数と失敗の内訳を表示する.
 
@@ -127,8 +134,12 @@ def main(count: int = 5, seed: int = 1, eval_type: str = "mbpp", providers_file:
         providers_file (str | None): agentに渡す providers 設定ファイル。
         workers (int): 並列実行数。レート制限が出るなら 1 に落とす。
         tpm_budget (int): 直近60秒に投入してよいトークン数の上限(0で無効)。
+        task_ids (str | tuple[str, ...]): カンマ区切りのtask_id。指定するとそのタスクだけを再測する。
+            fireはカンマ区切りをtupleに変換するため、strとtupleの両方を受ける。
         moulinette (str): moulinette_eval 実行ファイルのパス。
     """
+    raw_ids = task_ids.split(",") if isinstance(task_ids, str) else task_ids
+    wanted = tuple(str(part).strip() for part in raw_ids if str(part).strip())
     if not Path(moulinette).exists():
         raise SystemExit(f"moulinette_eval not found: {moulinette}")
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -136,7 +147,7 @@ def main(count: int = 5, seed: int = 1, eval_type: str = "mbpp", providers_file:
     run_root.mkdir(parents=True, exist_ok=True)
     print(f"[harness] providers={providers_file or 'default'} workers={workers} run={run_root}", flush=True)
 
-    tasks = _select(moulinette, count, seed, run_root)
+    tasks = _select(moulinette, count, seed, run_root, wanted)
     print(f"[harness] selected {len(tasks)} tasks", flush=True)
 
     spent: list[tuple[float, int]] = []
@@ -153,21 +164,29 @@ def main(count: int = 5, seed: int = 1, eval_type: str = "mbpp", providers_file:
             time.sleep(3.0)
 
     results: list[TaskResult] = []
+
+    def report(result: TaskResult) -> None:
+        """1タスク分の結果を即座に1行表示して集計へ加える(長時間runの進捗を見るため)."""
+        mark = "PASS" if result.passed else ("CRASH" if result.crashed else "FAIL")
+        print(f"  {result.task_id:>6}: {mark:5} iter={result.iterations} "
+              f"in={result.input_tokens} out={result.output_tokens} "
+              f"err={result.error} ({result.detail})", flush=True)
+        results.append(result)
+
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = []
+        pending = []
         for task_id, path in tasks:
             pace()
-            futures.append(pool.submit(_solve, moulinette, task_id, path, providers_file))
+            future = pool.submit(_solve, moulinette, task_id, path, providers_file)
+            # 逐次実行なら1件ごとに待って即表示する。並列なら投入後にまとめて回収する。
             if workers == 1:
-                result = futures[-1].result()
+                result = future.result()
                 spent.append((time.monotonic(), result.input_tokens + result.output_tokens))
-        for future in futures:
-            result = future.result()
-            mark = "PASS" if result.passed else ("CRASH" if result.crashed else "FAIL")
-            print(f"  {result.task_id:>6}: {mark:5} iter={result.iterations} "
-                  f"in={result.input_tokens} out={result.output_tokens} "
-                  f"err={result.error} ({result.detail})", flush=True)
-            results.append(result)
+                report(result)
+            else:
+                pending.append(future)
+        for future in pending:
+            report(future.result())
 
     passed = sum(1 for r in results if r.passed)
     summary = {"timestamp": timestamp, "providers_file": providers_file, "count": count, "seed": seed,

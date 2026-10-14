@@ -43,6 +43,9 @@ class MBPPProfile(TaskProfile):
             "any extra statement that raises fails the submission.\n"
             "- HIDDEN TESTS: you see only part of the suite. Write a general, correct "
             "implementation; never hardcode the shown values.\n"
+            "- The hidden tests probe edge cases, so add your own asserts for them before "
+            "submitting (empty input, nothing matching, duplicates, order variations). When "
+            "nothing matches, return None rather than inventing '', -1 or 0.\n"
             "- If run_tests fails, read the output, fix the code, retry."
         )
 

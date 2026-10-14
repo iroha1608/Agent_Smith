@@ -8,13 +8,14 @@ LimitTrackerの先頭ガード -> LLM生成 -> <end_code>除去 -> コード抽�
  のループを回す。
  final_answer()で成功終了、ハード制限で打ち切り。
 """
+import ast
 from collections.abc import Callable
 
 from src.agent.extractor.code_extractor import CodeExtractor
 from src.agent.limits import LimitTracker, StopReason
 from src.agent.llm.provider.provider import LLMGenerator, LLMResponse, LLMError
 from src.agent.extractor.python_extractor import was_salvaged
-from src.agent.observation import build_observation, malformed_code_note, observation_no_code
+from src.agent.observation import budget_note, build_observation, malformed_code_note, observation_no_code
 from src.agent.llm.transport.transport import TransportError
 from src.agent.prompt.task_profile.task_profile import TaskProfile
 from src.agent.prompt.template import build_system_prompt
@@ -156,9 +157,12 @@ class Orchestrator:
             cleaned_code = response.text.replace("<end_code>", "")
             code = self.extractor.extract(cleaned_code)
 
-            # コードが抽出できなかった場合は、Observationを生成して次のループに進む
+            # コードが抽出できなかった場合は、Observationを生成して次のループに進む。
+            # 1反復の上限ぶんを使い切っているなら「散文で考え込んで切られた」ことが原因なので、
+            # それを名指しして伝える(黙って再促しすると同じ失敗を繰り返して予算が尽きる)。
             if code is None:
-                observation = observation_no_code()
+                cut_off_at = response.output_tokens if response.output_tokens >= max_tokens else None
+                observation = self._with_budget_note(observation_no_code(cut_off_at), tracker)
                 messages.append(
                     {"role": "user", "content": observation}
                 )
@@ -199,6 +203,7 @@ class Orchestrator:
                 # コードだけを残す。デバッグ用のprintだけの断片を出すと確実に不合格になる。
                 best_solution = code
 
+            observation = self._with_budget_note(observation, tracker)
             messages.append(
                 {"role": "user", "content": observation}
             )
@@ -228,6 +233,32 @@ class Orchestrator:
     # トークン概算の係数(実測: 英文+コードで1トークン≒3.9文字)。
     # 事前ガードで使うため、安全側に小さめの値で割って多めに見積もる。
     _CHARS_PER_TOKEN = 3.6
+    # 残り出力トークンが「1反復ぶん × この倍率」以下になったら提出を促す。
+    # 1(=残り1反復ぶん)にしているのは、本番設定(総1500 / 1反復600)で2にすると
+    # 1反復目の直後(残り1200)から警告が出てしまい、3〜5反復かけて正解に至るタスクを
+    # 早期提出へ追い込むため。「次が最後の1手」になった時点でだけ促す。
+    _BUDGET_WARN_FACTOR = 1
+
+    def _with_budget_note(self, observation: str, tracker: LimitTracker) -> str:
+        """残り出力トークンが乏しければ、提出を促す一文をObservationの末尾に足す.
+
+        出力予算切れでの打ち切りは不合格が確定する。残り1反復ぶんになった時点で
+        「最善を提出せよ」と明示した方が、黙って探索を続けさせるより期待値が高い。
+
+        Args:
+            observation (str): 組み立て済みのObservation文字列。
+            tracker (LimitTracker): 現在の消費状況を持つトラッカー。
+
+        Returns:
+            str: 必要なら警告文を足したObservation文字列。
+        """
+        remaining = tracker.remaining_output_tokens()
+        if remaining > self.limits.max_output_tokens_per_iteration * self._BUDGET_WARN_FACTOR:
+            return observation
+        if remaining <= 0:
+            # 次の反復は制限チェックで打ち切られるため、促しても送られない。
+            return observation
+        return f"{observation}\n{budget_note(remaining)}"
 
     @classmethod
     def _estimate_tokens(cls, messages: list[dict[str, str]]) -> int:
@@ -268,9 +299,25 @@ class Orchestrator:
             text = "\n".join(lines).strip()
         return text
 
-    @staticmethod
-    def _reject_reason(solution: str) -> str | None:
+    # 採点環境に存在しないサンドボックス専用の名前。これらを参照するコードを提出すると
+    # NameErrorで全テストが落ちる。実測(MBPPタスク160)では、打ち切り時のフォールバックが
+    # `report = json.loads(run_tests(code="""..."""))` という検証用ラッパーをそのまま提出していた。
+    _SANDBOX_ONLY_NAMES = frozenset({"run_tests", "final_answer"})
+    # トップレベルに置いても採点時に例外を投げない文。採点側は提出コードにテスト行を
+    # 連結してファイル全体を実行するため、これ以外の文(デモ呼び出し/assert/print等)は
+    # 1つでも例外を投げると提出全体が不合格になる。
+    _ALLOWED_TOP_LEVEL = (
+        ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef,
+        ast.ClassDef, ast.Assign, ast.AnnAssign,
+    )
+
+    @classmethod
+    def _reject_reason(cls, solution: str) -> str | None:
         """提出コードを受理してよいか検査し、だめな理由を返す.
+
+        採点側は提出コードに隠しテストを連結してファイル全体を実行し、exit 0のみを合格とする。
+        そのため「構文が通る」だけでは足りず、(1)関数定義がある (2)トップレベルに例外を
+        投げ得る文が無い (3)サンドボックス専用の名前を参照していない の3点を確かめる。
 
         Args:
             solution (str): サニタイズ済みの提出コード。
@@ -281,11 +328,36 @@ class Orchestrator:
         if not solution:
             return "final_answer() received an empty value"
         try:
-            compile(solution, "<solution>", "exec")
+            tree = ast.parse(solution)
         except SyntaxError as error:
             return f"the submitted code is not valid Python ({error.msg} on line {error.lineno})"
-        if "def " not in solution:
+
+        # サンドボックス専用名の検査を先に行う。検証ラッパーをそのまま提出した場合、
+        # 関数定義が文字列リテラルの中にあるため「関数定義なし」が先に当たってしまい、
+        # 本当の原因(ラッパーごと提出した)が伝わらない。
+        referenced = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        blocked = sorted(referenced & cls._SANDBOX_ONLY_NAMES)
+        if blocked:
+            return (
+                f"the submitted code calls {', '.join(blocked)}, which exist only inside this "
+                "sandbox. Submit just the function source, with no test harness around it"
+            )
+
+        if not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in tree.body):
             return "the submitted code contains no function definition"
+
+        for node in tree.body:
+            if isinstance(node, cls._ALLOWED_TOP_LEVEL):
+                continue
+            # モジュールdocstringだけは例外を投げないので許す
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+                    and isinstance(node.value.value, str):
+                continue
+            return (
+                f"the submitted code has a top-level {type(node).__name__} statement. Submit only "
+                "imports and the function definition(s): the grader appends its own tests to your "
+                "code and runs the whole file, so any extra statement that raises fails it"
+            )
         return None
 
     @staticmethod
@@ -314,10 +386,31 @@ class Orchestrator:
         for message in tail:
             content = message["content"]
             budget = limits.get(message["role"])
-            if budget is not None and len(content) > budget:
-                content = content[:budget] + "\n...[truncated]"
+            if budget is not None:
+                content = Orchestrator._truncate_middle(content, budget)
             trimmed.append({"role": message["role"], "content": content})
         return head + trimmed
+
+    @staticmethod
+    def _truncate_middle(content: str, budget: int) -> str:
+        """中央を省き、前後の両端を残す形で切り詰める.
+
+        Observationは先頭にstatus/stdout、末尾に `--- note ---` の助言が来る。
+        先頭だけ残す切り詰めだと、最も行動を促す助言(切り詰め警告・予算警告・提出の却下理由)が
+        必ず落ちてしまい、LLMに伝わらない。
+
+        Args:
+            content (str): 切り詰め対象の本文。
+            budget (int): 残してよい最大文字数。
+
+        Returns:
+            str: budget以内に収めた本文(超過時は中央を省略マーカーに置換)。
+        """
+        if len(content) <= budget:
+            return content
+        head_size = budget * 2 // 3
+        tail_size = budget - head_size
+        return f"{content[:head_size]}\n...[truncated]...\n{content[-tail_size:]}"
 
     def _build_step(
         self,

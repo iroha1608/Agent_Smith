@@ -1,0 +1,104 @@
+{
+  "timestamp": "2026-10-14_13-55-10",
+  "providers_file": "tools/providers_mbpp.json",
+  "count": 5,
+  "seed": 1,
+  "workers": 1,
+  "passed": 3,
+  "results": [
+    {
+      "task_id": "264",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 945,
+      "output_tokens": 447,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "462",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 4,
+      "input_tokens": 5212,
+      "output_tokens": 1374,
+      "error": "MAX_INPUT_TOKENS",
+      "models": [
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "400",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 2,
+      "input_tokens": 2095,
+      "output_tokens": 234,
+      "error": null,
+      "models": [
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "160",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 4,
+      "input_tokens": 5499,
+      "output_tokens": 1500,
+      "error": "MAX_OUTPUT_TOKENS",
+      "models": [
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "235",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 4,
+      "input_tokens": 5561,
+      "output_tokens": 1500,
+      "error": "MAX_OUTPUT_TOKENS",
+      "models": [
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b"
+      ]
+    },
+    {
+      "task_id": "395",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 3,
+      "input_tokens": 3182,
+      "output_tokens": 1066,
+      "error": null,
+      "models": [
+        "openai/gpt-oss-120b"
+      ]
+    },
+    {
+      "task_id": "239",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 3,
+      "input_tokens": 3590,
+      "output_tokens": 1500,
+      "error": "MAX_OUTPUT_TOKENS",
+      "models": [
+        "openai/gpt-oss-120b"
+      ]
+    }
+  ]
+}

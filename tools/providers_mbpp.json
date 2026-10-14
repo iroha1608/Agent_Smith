@@ -9,7 +9,17 @@
         "openai/gpt-oss-20b"
       ],
       "keys_env": "GROQ_API_KEY",
-      "priority": 1
+      "priority": 1,
+      "model_params": {
+        "openai/gpt-oss-120b": {
+          "reasoning_effort": "low",
+          "reasoning_format": "hidden"
+        },
+        "openai/gpt-oss-20b": {
+          "reasoning_effort": "low",
+          "reasoning_format": "hidden"
+        }
+      }
     }
   ]
 }
