@@ -24,7 +24,9 @@ _DEFAULT_MOULINETTE_PATH = str(DEFAULT_MOULINETTE)
 AGENT_HARD_TIMEOUT_SEC = 180
 # groq無料枠はモデル毎に 8000 tokens/min。連続実行で枠を自分で枯らさないよう、
 # 直近60秒に投入したトークン量を見て次のタスク開始を待つ(ハーネス側のペーシング)。
-TOKENS_PER_TASK_ESTIMATE = 2500
+# 実測(2026-10-14の50問run・枠が生きていた42件): 1タスクの総トークンは中央値2680/平均3199/最大7150。
+# 2500では平均の1.3倍過小で、枠を自分で枯らして末尾8タスクがLLM_UNAVAILABLEになった。
+TOKENS_PER_TASK_ESTIMATE = 4000
 
 
 @dataclass

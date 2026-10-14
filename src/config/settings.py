@@ -11,6 +11,7 @@ pydantic-settingsを使うと、環境変数やJSON/YAMLファイルから設定
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict
 from pydantic_settings import (
     BaseSettings,
@@ -172,6 +173,87 @@ def select_provider(
         updates["models"] = [model_name]
 
     return primary.model_copy(update=updates) if updates else primary
+
+
+def _same_url(left: str, right: str) -> bool:
+    """末尾のスラッシュと大文字小文字の違いを無視してURLを比べる."""
+    return left.rstrip("/").lower() == right.rstrip("/").lower()
+
+
+def _guess_keys_env(provider_url: str) -> str | None:
+    """未知のプロバイダURLから、APIキーの環境変数名を推測する(例: api.mistral.ai -> MISTRAL_API_KEY).
+
+    Args:
+        provider_url (str): プロバイダのURL。
+
+    Returns:
+        str | None: 推測した環境変数名。推測できなければNone。
+    """
+    host = urlsplit(provider_url).hostname or ""
+    labels = [label for label in host.split(".") if label not in ("api", "www", "")]
+    if len(labels) < 2:
+        return None
+    return f"{labels[-2].upper().replace('-', '_')}_API_KEY"
+
+
+def order_providers(
+    providers: list[ProviderConfig],
+    model_name: str | None = None,
+    provider_url: str | None = None
+) -> list[ProviderConfig]:
+    """CLI引数(--model-name / --provider-url)を反映した、試行順のプロバイダ列を返す.
+
+    指定が無ければpriority順のまま。指定があれば、URL(無ければモデル名)が一致する設定を
+    探して先頭に置き、そのプロバイダのキー(keys_env)とモデル別パラメータをそのまま使う。
+    指定モデルを先頭にし、同じプロバイダの他モデルと他プロバイダはフォールバックとして残す。
+    どれにも一致しない未知のプロバイダは、URLからキーの環境変数名を推測して新しい設定を作る
+    (主エントリのキーを流用すると、別会社にキーを送ってしまうため)。
+
+    Args:
+        providers (list[ProviderConfig]): priority順のプロバイダ設定。
+        model_name (str | None): CLIで指定されたモデル名。
+        provider_url (str | None): CLIで指定されたプロバイダURL。
+
+    Returns:
+        list[ProviderConfig]: 先頭が主、残りがフォールバックのプロバイダ列。
+
+    Raises:
+        ValueError: providersが空の場合。
+    """
+    if not providers:
+        raise ValueError("No providers available to select from.")
+    if not model_name and not provider_url:
+        return list(providers)
+
+    matched: int | None = None
+    if provider_url:
+        matched = next((index for index, provider in enumerate(providers)
+                        if _same_url(provider.provider_url, provider_url)), None)
+    if matched is None and model_name:
+        matched = next((index for index, provider in enumerate(providers)
+                        if model_name in provider.models), None)
+
+    if matched is None:
+        primary = select_provider(providers, model_name, provider_url)
+        guessed = _guess_keys_env(provider_url) if provider_url else None
+        if guessed and guessed != primary.keys_env:
+            primary = primary.model_copy(update={
+                "name": guessed.removesuffix("_API_KEY").lower(),
+                "keys_env": guessed,
+                "model_params": {},
+                "additional_params": {},
+            })
+        return [primary, *providers]
+
+    base = providers[matched]
+    updates: dict[str, Any] = {}
+    if provider_url:
+        updates["provider_url"] = provider_url
+    if model_name:
+        updates["models"] = [model_name, *[model for model in base.models if model != model_name]]
+    first = base.model_copy(update=updates) if updates else base
+    rest = [provider for index, provider in enumerate(providers) if index != matched]
+    return [first, *rest]
 
 
 def load_settings(**cli_overrides: Any) -> Settings:

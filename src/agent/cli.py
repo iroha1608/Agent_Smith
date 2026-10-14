@@ -20,7 +20,7 @@ from src.agent.llm.resilient_client import ResilientLLMClient
 from src.agent.llm.transport.requests_transport import RequestsTransport
 from src.agent.orchestrator import Orchestrator
 from src.agent.prompt.task_profile.mbpp_profile import MBPPProfile
-from src.config.settings import load_providers, load_settings, select_provider
+from src.config.settings import load_providers, load_settings, order_providers
 from src.models.input import MBPPTaskInput
 from src.sandbox.sandbox_main import Sandbox
 from src.models.sandbox_config import SandboxConfig
@@ -40,6 +40,10 @@ def format_mbpp_task(task_input: MBPPTaskInput) -> str:
         f"Problem:\n{task_input.task_definition}\n",
         f"Function signature:\n{task_input.function_definition}\n",
     ]
+    if task_input.test_imports:
+        # 採点側は「解答 + test_imports + テスト」の順に連結して実行する
+        lines.append("\nThe tests run after these imports:\n")
+        lines.extend(task_input.test_imports)
     if task_input.test_list:
         lines.append("\nYour solution must pass these tests:\n")
         lines.extend(task_input.test_list)
@@ -107,11 +111,8 @@ def run_mbpp_agent(
     # .envから環境変数を読み込む
     load_dotenv()
 
-    providers = load_providers(providers_file_path)
-    # select_providerはpriority[0](最小)を基点に上書きコピーを返す
-    primary_provider = select_provider(providers, model_name, provider_url)
-    # primary_providerを先頭にして優先度順に並べる
-    providers = [primary_provider, *providers[1:]]
+    # CLIで指定されたモデル / URLのプロバイダを先頭に、残りをフォールバックとして並べる
+    providers = order_providers(load_providers(providers_file_path), model_name, provider_url)
 
     # 時間制限を使い果たさないようにデッドラインを計算
     # バックオフ待機はこの残予算にクランプされる
@@ -140,7 +141,7 @@ def run_mbpp_agent(
             sandbox=sandbox,
             profile=MBPPProfile(),
             limits=settings.limits,
-            solution_verifier=make_mbpp_verifier(sandbox, task_input.test_list)
+            solution_verifier=make_mbpp_verifier(sandbox, [*task_input.test_imports, *task_input.test_list])
         )
 
         # 実行 -> SolutionOutput 書き出し

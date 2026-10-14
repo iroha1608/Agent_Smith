@@ -6,7 +6,7 @@ import pytest
 
 from src.config.settings import Settings, load_settings
 # load_providers/select_provider のテストは 07 の §4 のまま(同居なら同一import)
-from src.config.settings import load_providers, select_provider
+from src.config.settings import load_providers, order_providers, select_provider
 
 
 def _write(path: Path, obj: object) -> str:
@@ -89,3 +89,36 @@ def test_shipped_config_files_parse(monkeypatch: pytest.MonkeyPatch) -> None:
 # test_shipped_config_files_parse:
     providers = load_providers(str(repo_root / "providers" / "providers.json"))
     assert providers[0].priority == 1                   # priority昇順で先頭が主
+
+
+def test_order_providers_uses_matching_provider_keys(tmp_path: Path) -> None:
+    """--provider-url が既知のプロバイダなら、そのキーで指定モデルを先頭に試す(主エントリのキーを流用しない)."""
+    providers = load_providers(_write(tmp_path / "providers.json", _PROVIDERS))
+    ordered = order_providers(providers, model_name="x/y", provider_url="https://api.groq.com/openai/v1/")
+    assert ordered[0].name == "groq"
+    assert ordered[0].keys_env == "GROQ_API_KEY"
+    assert ordered[0].models == ["x/y", "llama-3.3-70b-versatile"]
+    assert [p.name for p in ordered[1:]] == ["openrouter"]
+
+
+def test_order_providers_matches_by_model_name(tmp_path: Path) -> None:
+    """URLの指定が無くても、モデル名を持つプロバイダを先頭にする."""
+    providers = load_providers(_write(tmp_path / "providers.json", _PROVIDERS))
+    ordered = order_providers(providers, model_name="llama-3.3-70b-versatile")
+    assert ordered[0].name == "groq"
+    assert len(ordered) == 2
+
+
+def test_order_providers_unknown_url_guesses_keys_env(tmp_path: Path) -> None:
+    """未知のURLはホスト名からキーの環境変数名を推測し、既存プロバイダはフォールバックに残す."""
+    providers = load_providers(_write(tmp_path / "providers.json", _PROVIDERS))
+    ordered = order_providers(providers, model_name="m", provider_url="https://api.together.xyz/v1")
+    assert ordered[0].keys_env == "TOGETHER_API_KEY"
+    assert ordered[0].models == ["m"]
+    assert [p.name for p in ordered[1:]] == ["openrouter", "groq"]
+
+
+def test_order_providers_without_cli_keeps_priority(tmp_path: Path) -> None:
+    """指定が無ければpriority順のまま."""
+    providers = load_providers(_write(tmp_path / "providers.json", _PROVIDERS))
+    assert [p.name for p in order_providers(providers)] == ["openrouter", "groq"]

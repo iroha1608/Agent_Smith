@@ -19,7 +19,7 @@ if report['success']:
 Observation:
 [OK] Executed successfully.
 --- stdout ---
-{'success': True, 'message': 'passed', 'output': ''}
+{'success': True, 'message': 'passed', 'output': '1/1 tests passed.'}
 '''
 
 
@@ -42,11 +42,12 @@ class MBPPProfile(TaskProfile):
             "asserts or demo calls: the grader appends its own tests to your code and runs it, so "
             "any extra statement that raises fails the submission.\n"
             "- HIDDEN TESTS: you see only part of the suite. Write a general, correct "
-            "implementation; never hardcode the shown values.\n"
-            "- The hidden tests probe edge cases, so add your own asserts for them before "
-            "submitting (empty input, nothing matching, duplicates, order variations). When "
-            "nothing matches, return None rather than inventing '', -1 or 0.\n"
-            "- If run_tests fails, read the output, fix the code, retry."
+            "implementation; never hardcode the shown values. Infer the intended rule from ALL the "
+            "given examples (they often encode a convention the wording leaves out).\n"
+            "- Gate final_answer on the task's own asserts only. Do not add asserts you invented: "
+            "if they are wrong they block a correct submission. To explore edge cases, print values.\n"
+            "- If run_tests fails, its output names each failing assert and what your function "
+            "actually returned. Compare that with the expected value, fix the rule, retry."
         )
 
     def final_answer_specification(self) -> str:

@@ -1,0 +1,15 @@
+{
+  "providers": [
+    {
+      "name": "gemini",
+      "provider_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "models": [
+        "gemini-3-flash-preview",
+        "gemini-3.5-flash-lite",
+        "gemma-4-31b-it"
+      ],
+      "keys_env": "GEMINI_API_KEY",
+      "priority": 1
+    }
+  ]
+}
