@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import (
     BaseSettings,
     JsonConfigSettingsSource,
@@ -33,6 +33,21 @@ class Limits(BaseModel):
     max_output_tokens_per_iteration: int = 500
     total_time_sec: float = 120.0
     time_margin_sec: float = 10.0
+
+
+def _swebench_limits() -> "Limits":
+    """SWE-benchの既定のハード制限(課題 VI.1.2: 30反復 / 入力30万 / 出力1万 / 900秒).
+
+    time_margin_sec はDockerコンテナの停止・削除とパッチ回収の時間を見込んで長めに取る。
+    """
+    return Limits(
+        max_iterations=30,
+        max_input_tokens=300_000,
+        max_output_tokens=10_000,
+        max_output_tokens_per_iteration=1_200,
+        total_time_sec=900.0,
+        time_margin_sec=60.0,
+    )
 
 
 class SandboxSettings(BaseModel):
@@ -91,6 +106,7 @@ class Settings(BaseSettings):
     )
 
     limits: Limits = Limits()
+    swebench_limits: Limits = Field(default_factory=_swebench_limits)
     sandbox: SandboxSettings = SandboxSettings()
     logging: LoggingSettings = LoggingSettings()
     manual: ManualSettings = ManualSettings()

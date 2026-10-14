@@ -1,23 +1,42 @@
 """SWE-bench用のエントリーポイントモジュール.
 
-`uv run python3 -m agent_swebench
+`uv run python -m agent_swebench
 --task-file ../cache/swebench_task.json
 --output ../cache/swebench_solution.json
---model-name "model/name" --provider-url "http://provider.api/v1"`
+--model-name "model/name" --provider-url "https://provider.api/v1"`
 """
 import fire
+
+from src.agent.cli import run_swebench_agent
 
 
 def agent_swebench(
     task_file: str,
     output: str,
-    model_name: str,
-    provider_url: str,
+    model_name: str | None = None,
+    provider_url: str | None = None,
+    providers_file_path: str = "providers/providers.json",
     **extra_args: object
 ) -> None:
-    """SWE-bench用のエントリーポイント関数."""
+    """SWE-bench用のエントリーポイント関数.
+
+    Args:
+        task_file (str): SWE-benchタスクファイルのパス
+        output (str): SolutionOutputを書き出すJSONファイルのパス
+        model_name (str | None): 使用するLLMモデル名。Noneなら設定ファイルのデフォルトを使用
+        provider_url (str | None): 使用するLLMプロバイダのURL。Noneなら設定ファイルのデフォルトを使用
+        providers_file_path (str): プロバイダ設定ファイルのパス
+        **extra_args (object): fireが解釈できなかった余分な引数。存在する場合はエラーを発生させる。
+    """
     if extra_args:
-        print(f"Extra arguments: {extra_args}")
+        raise SystemExit(f"Unknown arguments: {list(extra_args)}")
+    run_swebench_agent(
+        task_file_path=task_file,
+        output_file_path=output,
+        model_name=model_name,
+        provider_url=provider_url,
+        providers_file_path=providers_file_path
+    )
 
 
 if __name__ == "__main__":

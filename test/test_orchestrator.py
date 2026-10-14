@@ -227,9 +227,24 @@ def test_window_truncation_keeps_the_trailing_note() -> None:
          {"role": "assistant", "content": "a"}, {"role": "user", "content": observation}]
     )
     sent = windowed[-1]["content"]
-    assert len(sent) <= MBPPProfile.observation_max_chars + len("\n...[truncated]...\n")
+    assert len(sent) <= MBPPProfile.latest_observation_max_chars + len("\n...[truncated]...\n")
     assert "head marker" in sent
     assert "TAIL MARKER" in sent
+
+
+def test_older_observations_are_trimmed_harder_than_the_latest() -> None:
+    """直前のObservationは長めに残し、それより前のものは短く切り詰める."""
+    old_obs = "OLD " + "y" * 5000
+    new_obs = "NEW " + "z" * 5000
+    windowed = _orchestrator([])._window_messages(
+        [{"role": "system", "content": "s"}, {"role": "user", "content": "task"},
+         {"role": "assistant", "content": "a1"}, {"role": "user", "content": old_obs},
+         {"role": "assistant", "content": "a2"}, {"role": "user", "content": new_obs}]
+    )
+    marker = len("\n...[truncated]...\n")
+    assert len(windowed[3]["content"]) <= MBPPProfile.observation_max_chars + marker
+    assert len(windowed[5]["content"]) <= MBPPProfile.latest_observation_max_chars + marker
+    assert len(windowed[5]["content"]) > len(windowed[3]["content"])
 
 
 def test_endcode_inside_block_is_stripped() -> None:

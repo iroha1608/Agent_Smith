@@ -199,10 +199,7 @@ class Orchestrator:
                 steps.append(
                     self._build_step(len(steps) + 1, response, "", observation)
                 )
-                misses_in_a_row += 1
-                if misses_in_a_row >= self._ROTATE_AFTER_MISSES:
-                    self._rotate_provider()
-                    misses_in_a_row = 0
+                misses_in_a_row = self._count_miss(misses_in_a_row, submitted=False)
                 continue
 
             # コードが抽出できた場合は、サンドボックスで実行し、Observationを生成する
@@ -253,10 +250,7 @@ class Orchestrator:
             )
 
             # 提出に至らない反復が続いたら、次から別プロバイダのモデルを優先させる
-            misses_in_a_row = 0 if submission is not None else misses_in_a_row + 1
-            if misses_in_a_row >= self._ROTATE_AFTER_MISSES:
-                self._rotate_provider()
-                misses_in_a_row = 0
+            misses_in_a_row = self._count_miss(misses_in_a_row, submitted=submission is not None)
 
             # 検査を通った提出があれば、成功としてSolutionOutputを返す
             if submission is not None:
@@ -271,8 +265,27 @@ class Orchestrator:
                     error=None
                 )
 
-    # 提出に至らない反復がこの回数続いたら、別プロバイダのモデルへ切り替える
-    _ROTATE_AFTER_MISSES = 2
+    def _count_miss(self, misses_in_a_row: int, submitted: bool) -> int:
+        """提出に至らなかった反復の連続数を更新し、閾値に達したらモデルを切り替える.
+
+        閾値はプロファイルが決める(MBPPは2回。SWE-benchは探索で提出しない反復が続くのが
+        正常なので切り替えない)。
+
+        Args:
+            misses_in_a_row (int): これまでの連続数。
+            submitted (bool): この反復で検査を通った提出があったか。
+
+        Returns:
+            int: 更新後の連続数(切り替えたら0に戻す)。
+        """
+        if submitted:
+            return 0
+        misses_in_a_row += 1
+        threshold = self.profile.rotate_after_misses
+        if threshold is not None and misses_in_a_row >= threshold:
+            self._rotate_provider()
+            return 0
+        return misses_in_a_row
 
     def _rotate_provider(self) -> None:
         """LLMクライアントが切り替えに対応していれば、別プロバイダのモデルを優先させる.
@@ -397,9 +410,12 @@ class Orchestrator:
 
         limits = {"user": self.profile.observation_max_chars, "assistant": self.profile.assistant_max_chars}
         trimmed: list[dict[str, str]] = []
-        for message in tail:
+        for index, message in enumerate(tail):
             content = message["content"]
             budget = limits.get(message["role"])
+            # 直前の反復の結果(LLMがこれから読むObservation)は、過去分より長く残す
+            if index == len(tail) - 1 and message["role"] == "user":
+                budget = max(budget or 0, self.profile.latest_observation_max_chars)
             if budget is not None:
                 content = Orchestrator._truncate_middle(content, budget)
             trimmed.append({"role": message["role"], "content": content})

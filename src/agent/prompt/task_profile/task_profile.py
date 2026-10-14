@@ -19,6 +19,7 @@ DEFAULT_FORMAT_RULES = """- One brief Thought line (20 words max), then exactly 
   limit, and a reply that never closes a ```python block runs nothing and burns the budget.
   Write the candidate in code and let the Observation correct you.
 - Only what you print() (plus errors and tracebacks) comes back in the Observation.
+- The tools and final_answer are already defined globals: call them directly, never import them.
 - The namespace persists between turns, but your FINAL answer must be SELF-CONTAINED.
 - Limits on iterations, tokens and time are strict: keep turns short, never print large output."""
 
@@ -31,13 +32,20 @@ class TaskProfile(ABC):
 
     Attributes:
         history_window (int): LLMへ再送する直近の往復数。
-        observation_max_chars (int): 再送するObservation(role=user)1件の最大文字数。
+        observation_max_chars (int): 再送する過去のObservation(role=user)1件の最大文字数。
+        latest_observation_max_chars (int): 直前の反復のObservation(LLMがこれから読む結果)の最大文字数。
+            過去分より長く残す(run_testsの失敗詳細や読んだファイルの中身を途中で切らないため)。
         assistant_max_chars (int): 再送するassistant発話1件の最大文字数。
+        rotate_after_misses (int | None): 提出に至らない反復がこの回数続いたら別プロバイダの
+            モデルへ切り替える。Noneなら切り替えない(探索が本分で、提出しない反復が続くのが
+            正常なタスク向け)。
     """
 
     history_window: int = 2
     observation_max_chars: int = 800
+    latest_observation_max_chars: int = 1500
     assistant_max_chars: int = 1200
+    rotate_after_misses: int | None = 2
 
     def format_rules(self) -> str:
         """システムプロンプトの出力形式のルールを返す.

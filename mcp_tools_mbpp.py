@@ -14,8 +14,8 @@ server = MCPServer(name="agent-smith-mbpp", version="0.1.0")
 TIMEOUT = 10
 # LLMへ返す出力の上限文字数(長すぎるとObservationが切り詰められ、肝心の失敗理由が落ちる)
 OUTPUT_LIMIT = 1500
-# 1件のテスト結果の上限文字数
-DETAIL_LIMIT = 300
+# 失敗したassert文を表示するときの上限文字数(実際の値と期待値は子プロセス側で別に切り詰める)
+TEST_TEXT_LIMIT = 160
 # 子プロセスが結果JSONの前に付ける印(解答コードのprint出力と区別するため)
 RESULT_MARKER = "__RUN_TESTS_RESULT__"
 
@@ -28,6 +28,12 @@ import ast, json, sys, traceback
 source, tests, marker = json.loads(sys.stdin.read())
 namespace = {"__name__": "__main__"}
 results = []
+
+
+def clip(text, limit=240):
+    return text if len(text) <= limit else text[:limit] + "...(truncated)"
+
+
 try:
     exec(compile(source, "<solution>", "exec"), namespace)
 except BaseException as error:
@@ -47,7 +53,14 @@ else:
                 if isinstance(node, ast.Assert) and isinstance(node.test, ast.Compare):
                     left = node.test.left
                     value = eval(compile(ast.Expression(left), "<test>", "eval"), namespace)
-                    detail = f"{ast.unparse(left)} returned {value!r}"
+                    detail = "got " + clip(repr(value))
+                    if len(node.test.comparators) == 1 and isinstance(node.test.ops[0], ast.Eq):
+                        right = node.test.comparators[0]
+                        expected = eval(compile(ast.Expression(right), "<test>", "eval"), namespace)
+                        detail += ", expected " + clip(repr(expected))
+                        if type(value) is not type(expected):
+                            detail += (f" (you returned a {type(value).__name__}, "
+                                       f"the test expects a {type(expected).__name__})")
             except BaseException as inner:
                 detail = f"assertion failed (could not re-evaluate: {type(inner).__name__})"
             results.append({"test": test, "passed": False, "detail": detail})
@@ -80,7 +93,8 @@ def _format_report(results: list[dict[str, object]], stdout: str, stderr: str) -
     passed_count = len(asserts) - len([result for result in failed if result["test"] != "<your code>"])
     lines = [f"{passed_count}/{len(asserts)} tests passed."] if asserts else []
     for result in failed:
-        lines.append(_clip(f"FAILED: {result['test']}  ->  {result.get('detail', '')}", DETAIL_LIMIT))
+        # assert文は長いことがある(引数の大きなリスト等)。文を短く切り、肝心の「実際の値 / 期待値」は残す
+        lines.append(f"FAILED: {_clip(str(result['test']), TEST_TEXT_LIMIT)}  ->  {result.get('detail', '')}")
     if stdout.strip():
         lines.append("--- stdout ---\n" + stdout.strip())
     if stderr.strip():
