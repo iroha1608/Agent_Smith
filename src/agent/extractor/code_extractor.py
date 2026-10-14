@@ -1,14 +1,9 @@
 """コード抽出機能を提供するモジュール.
 
 LLMの出力テキストから、サンドボックスで実行するコードブロックを取り出す責務を持つ。
-抽出の形式ごとに具象クラス(Python / XML / JSON-Hermes / React)を用意し、
-orchestratorはCodeExtractor型として扱い形式差を吸収する。
-
-- [ ] CodeExtracterをベースに、形式別にサブクラスを作成する。
-    - [ ] Pythonコード
-    - [ ] XML形式
-    - [ ] JSON-Hermes形式
-    - [ ] React形式
+抽出の形式ごとに具象クラス(Python / XML / JSON-Hermes / ReAct)を用意し、
+CompositeCodeExtractor がそれらを優先度順に試す。orchestratorはCodeExtractor型として扱い、
+形式の違いを意識しない(課題 V.1: 非Python形式は等価なPython呼び出しに変換して実行する)。
 """
 from abc import ABC, abstractmethod
 

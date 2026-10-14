@@ -15,13 +15,15 @@ _RESP_ENDCODE_INSIDE = "Thought: oops.\n```python\nprint('x')<end_code>\n```"
 
 
 class StubProvider(LLMProvider):
-    """台本どおりに応答を返す決定的プロバイダ(ネットワーク不要)."""
+    """台本どおりに応答を返す決定的プロバイダ(ネットワーク不要)。受け取ったメッセージも記録する."""
 
     def __init__(self, responses: list[str]) -> None:
         self._responses = responses
         self._index = 0
+        self.received: list[list[dict[str, str]]] = []
 
     def generate(self, messages: list[dict[str, str]], stop_sequences: list[str], max_tokens: int) -> LLMResponse:
+        self.received.append(messages)
         text = self._responses[self._index]
         self._index += 1
         return LLMResponse(
@@ -67,13 +69,24 @@ def test_final_answer_success() -> None:
     assert solution.error is None
 
 
+def _feedback_after_first_step(provider: "StubProvider | _TruncatingStub") -> str:
+    """2回目のリクエストで送られた最後のuserメッセージ(=1反復目へのフィードバック)を返す."""
+    return provider.received[1][-1]["content"]
+
+
 def test_no_code_then_success() -> None:
-    """コード無し -> 再促し -> 次反復で提出成功(2反復)."""
-    solution = _orchestrator([_RESP_NO_CODE, _RESP_FINAL]).run("82", "mbpp", "task")
+    """コード無し -> 再促し -> 次反復で提出成功(2反復)。実行していないstepの入出力は空."""
+    provider = StubProvider([_RESP_NO_CODE, _RESP_FINAL])
+    orchestrator = Orchestrator(
+        provider=provider, extractor=PythonCodeExtractor(), sandbox=MockSandbox(),
+        profile=MBPPProfile(), limits=_limits(),
+    )
+    solution = orchestrator.run("82", "mbpp", "task")
     assert solution.success is True
     assert solution.iterations == 2
     assert solution.steps[0].sandbox_input == ""
-    assert solution.steps[0].sandbox_output.startswith("[NO_CODE]")
+    assert solution.steps[0].sandbox_output == ""
+    assert _feedback_after_first_step(provider).startswith("[NO_CODE]")
 
 
 def test_limit_stop_max_iterations() -> None:
@@ -103,8 +116,10 @@ class _TruncatingStub(LLMProvider):
     def __init__(self, responses: list[str]) -> None:
         self._responses = responses
         self._index = 0
+        self.received: list[list[dict[str, str]]] = []
 
     def generate(self, messages: list[dict[str, str]], stop_sequences: list[str], max_tokens: int) -> LLMResponse:
+        self.received.append(messages)
         text = self._responses[self._index]
         self._index += 1
         return LLMResponse(
@@ -127,13 +142,14 @@ def test_no_code_cut_off_names_prose_as_the_cause() -> None:
     実測(MBPPタスク264)では3反復すべてがこれで、既定の再促しでは同じ失敗を繰り返して
     累積出力1500を使い切って不合格になった。原因を指摘できているかを検証する。
     """
+    provider = _TruncatingStub([_RESP_NO_CODE, _RESP_FINAL])
     orchestrator = Orchestrator(
-        provider=_TruncatingStub([_RESP_NO_CODE, _RESP_FINAL]),
+        provider=provider,
         extractor=PythonCodeExtractor(), sandbox=MockSandbox(),
         profile=MBPPProfile(), limits=_limits(max_output_tokens_per_iteration=50),
     )
     solution = orchestrator.run("82", "mbpp", "task")
-    observation = solution.steps[0].sandbox_output
+    observation = _feedback_after_first_step(provider)
     assert observation.startswith("[NO_CODE]")
     assert "50-token allowance" in observation
     assert "cut off before any" in observation
@@ -142,8 +158,12 @@ def test_no_code_cut_off_names_prose_as_the_cause() -> None:
 
 def test_no_code_without_truncation_omits_cut_off_note() -> None:
     """上限に達せず自然に書き終えた場合は、切り詰めの助言を混ぜない(誤った原因を教えない)."""
-    solution = _orchestrator([_RESP_NO_CODE, _RESP_FINAL]).run("82", "mbpp", "task")
-    observation = solution.steps[0].sandbox_output
+    provider = StubProvider([_RESP_NO_CODE, _RESP_FINAL])
+    Orchestrator(
+        provider=provider, extractor=PythonCodeExtractor(), sandbox=MockSandbox(),
+        profile=MBPPProfile(), limits=_limits(),
+    ).run("82", "mbpp", "task")
+    observation = _feedback_after_first_step(provider)
     assert observation.startswith("[NO_CODE]")
     assert "cut off before any" not in observation
 
@@ -349,10 +369,9 @@ def test_total_requests_includes_failed_attempts() -> None:
     solution = orchestrator.run("82", "mbpp", "task")
     assert solution.success is False
     assert solution.error == "LLM_UNAVAILABLE"
-    # 全滅した反復も記録する(反復数とstepsの数を一致させる)
-    assert len(solution.steps) == 2
-    assert solution.iterations == 2
-    assert solution.steps[1].sandbox_output.startswith("[LLM_UNAVAILABLE]")
+    # LLMの応答が無い反復はstepにも反復数にも数えない(llm_outputを捏造しない)
+    assert len(solution.steps) == 1
+    assert solution.iterations == 1
     assert solution.total_requests == 1 + 3  # step1の1試行 + 全滅時の3試行
 
 

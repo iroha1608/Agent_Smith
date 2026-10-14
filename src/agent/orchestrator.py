@@ -147,23 +147,14 @@ class Orchestrator:
             # AllProvidersExhausted / BadRequestErrorをLLMErrorで一括で補足
             except (LLMError, TransportError) as error:
                 failed_requests = getattr(error, "attempts", 1)
-                # 失敗した試行でもプロバイダ側で消費したトークンは計上し、
-                # 反復数とstepsの数が食い違わないよう、この反復の記録も残す。
-                wasted_input = int(getattr(error, "input_tokens", 0) or 0)
-                wasted_output = int(getattr(error, "output_tokens", 0) or 0)
-                tracker.record_usage(wasted_input, wasted_output)
-                if failed_requests <= 0:
-                    # 残り時間が無く1回も送っていない。LLMを呼んでいないので反復に数えない。
-                    tracker.iterations -= 1
-                else:
-                    steps.append(StepMetrics(
-                        step=len(steps) + 1,
-                        input_tokens=wasted_input,
-                        output_tokens=wasted_output,
-                        request_time_ms=0.0,
-                        sandbox_output=f"[LLM_UNAVAILABLE] {error}"[:500],
-                        retries=failed_requests - 1,
-                    ))
+                # LLMの応答が無い反復はstepとして記録しない(llm_outputを捏造しないため)。
+                # 反復にも数えず、失敗した試行は total_requests に、プロバイダ側で消費された
+                # トークン(空応答など)は合計に計上する(制限の判定を甘くしないため)。
+                tracker.iterations -= 1
+                tracker.record_usage(
+                    int(getattr(error, "input_tokens", 0) or 0),
+                    int(getattr(error, "output_tokens", 0) or 0),
+                )
                 return self._build_solution(
                     task_id=task_id,
                     benchmark=benchmark,
@@ -172,7 +163,8 @@ class Orchestrator:
                     tracker=tracker,
                     steps=steps,
                     system_prompt=system_prompt,
-                    error="LLM_UNAVAILABLE"
+                    error="LLM_UNAVAILABLE",
+                    failed_requests=failed_requests
                 )
             tracker.record_usage(
                 response.input_tokens,
@@ -196,8 +188,11 @@ class Orchestrator:
                 messages.append(
                     {"role": "user", "content": observation}
                 )
+                # 何も実行していないので sandbox_input / sandbox_output は空(フィードバックは次の
+                # userメッセージとしてLLMに届く)。採点側の display は「入力が空なのに出力がある」
+                # stepを不自然とみなすため、実行結果が無いことをそのまま記録する。
                 steps.append(
-                    self._build_step(len(steps) + 1, response, "", observation)
+                    self._build_step(len(steps) + 1, response, "", "")
                 )
                 misses_in_a_row = self._count_miss(misses_in_a_row, submitted=False)
                 continue
