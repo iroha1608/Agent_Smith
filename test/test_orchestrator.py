@@ -388,3 +388,21 @@ def test_input_guard_shrinks_window_before_giving_up() -> None:
     assert solution.total_input_tokens <= 6000
     assert solution.error == "MAX_INPUT_TOKENS"
     assert min(sent_sizes) < max(sent_sizes)   # 途中で窓を縮めて送った
+
+
+def test_hardcoded_answers_are_detected() -> None:
+    """可視テストの答えをreturnに直書きした提出を検出する(MBPP 268 実測)."""
+    from src.agent.prompt.task_profile.mbpp_profile import hardcoded_answers
+    tests = ["assert find_star_num(4) == 73", "assert find_star_num(5) == 121"]
+    hardcoded = "def find_star_num(n):\n    if n == 4:\n        return 73\n    elif n == 5:\n        return 121\n"
+    general = "def find_star_num(n):\n    return 6 * n * (n - 1) + 1\n"
+    assert hardcoded_answers(hardcoded, tests) == ["73", "121"]
+    assert hardcoded_answers(general, tests) == []
+
+
+def test_trivial_return_values_are_not_hardcoding() -> None:
+    """None / True / False のようなありふれた戻り値の一致は直書きとみなさない."""
+    from src.agent.prompt.task_profile.mbpp_profile import hardcoded_answers
+    tests = ["assert is_even(2) == True", "assert is_even(3) == False"]
+    solution = "def is_even(n):\n    if n % 2 == 0:\n        return True\n    return False\n"
+    assert hardcoded_answers(solution, tests) == []

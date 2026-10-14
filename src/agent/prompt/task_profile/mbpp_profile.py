@@ -91,9 +91,88 @@ def mbpp_rejection(solution: str) -> str | None:
         )
     return None
 
+
+# 「答えを直書きした」と判定するときに無視する、ありふれた戻り値。
+# None / True / 0 / 空文字 などは正しい実装でも普通に return するので、一致しても証拠にならない。
+_TRIVIAL_LITERALS: tuple[object, ...] = (None, True, False, 0, 1, -1, "", (), [], {})
+
+
+def _literal_value(node: ast.AST) -> tuple[bool, object]:
+    """ASTノードがリテラルなら (True, 値)、そうでなければ (False, None) を返す.
+
+    Args:
+        node (ast.AST): 評価するノード。
+
+    Returns:
+        tuple[bool, object]: (リテラルだったか, その値)。
+    """
+    try:
+        return True, ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False, None
+
+
+def _is_trivial(value: object) -> bool:
+    """ありふれた戻り値(None, 0, True, 空文字など)かどうかを返す.
+
+    Args:
+        value (object): 判定する値。
+
+    Returns:
+        bool: ありふれた値ならTrue。
+    """
+    return any(type(value) is type(trivial) and value == trivial for trivial in _TRIVIAL_LITERALS)
+
+
+def hardcoded_answers(solution: str, test_list: list[str]) -> list[str]:
+    """提出コードが、可視テストの期待値をリテラルのまま return しているかを調べる.
+
+    実測(codestral, MBPPタスク268「n番目の星数」): `if n == 4: return 73 / elif n == 5: return 121`
+    と可視テストの答えを直書きし、可視テストだけの提出前検証を通過して、隠しテスト(n=3)で落ちた。
+    `assert f(...) == 期待値` の期待値のうち、ありふれた値を除いたものが2つ以上、そのまま
+    return のリテラルとして現れたら直書きとみなす(1つだけの一致は偶然でも起こるので見逃す)。
+
+    Args:
+        solution (str): 提出コード。
+        test_list (list[str]): 可視テスト(assert文)のリスト。
+
+    Returns:
+        list[str]: 直書きされていた期待値の repr。直書きでなければ空リスト。
+    """
+    expected: list[object] = []
+    for test in test_list:
+        try:
+            tree = ast.parse(test.strip())
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assert) and isinstance(node.test, ast.Compare) \
+                    and len(node.test.ops) == 1 and isinstance(node.test.ops[0], ast.Eq):
+                is_literal, value = _literal_value(node.test.comparators[0])
+                if is_literal and not _is_trivial(value):
+                    expected.append(value)
+    if len(expected) < 2:
+        return []
+    try:
+        solution_tree = ast.parse(solution)
+    except SyntaxError:
+        return []
+    returned: list[object] = []
+    for node in ast.walk(solution_tree):
+        if isinstance(node, ast.Return) and node.value is not None:
+            is_literal, value = _literal_value(node.value)
+            if is_literal:
+                returned.append(value)
+    matched: list[str] = []
+    for value in expected:
+        if any(type(value) is type(candidate) and value == candidate for candidate in returned):
+            if repr(value) not in matched:
+                matched.append(repr(value))
+    return matched if len(matched) >= 2 else []
+
+
 # 1ステップで「実装 -> run_testsで検証 -> 合格なら即submit」まで到す手本。
 # 反復数 / 累積トークンを最小化するため、検証と提出を同じコードブロックで行う形を示す。
-
 _MBPP_FEW_SHOT_EXAMPLE = '''Thought: Implement the function, verify it with the given tests, submit if they pass.
 ```python
 solution = """def add(a, b):

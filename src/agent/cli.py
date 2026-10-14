@@ -22,7 +22,7 @@ from src.agent.llm.resilient_client import ResilientLLMClient
 # from src.agent.llm.provider.openai_compat import OpenAICompatProvider
 from src.agent.llm.transport.requests_transport import RequestsTransport
 from src.agent.orchestrator import Orchestrator
-from src.agent.prompt.task_profile.mbpp_profile import MBPPProfile
+from src.agent.prompt.task_profile.mbpp_profile import MBPPProfile, hardcoded_answers
 from src.config.settings import load_providers, load_settings, order_providers
 from src.models.input import MBPPTaskInput
 from src.models.output import SolutionOutput
@@ -79,6 +79,14 @@ def make_mbpp_verifier(
         """提出コードを run_tests に通し、(合否, 詳細)を返す."""
         if not test_list:
             return True, ""
+        # 可視テストの答えを直書きした提出は、可視テストを通っても隠しテストで落ちる
+        hardcoded = hardcoded_answers(solution, test_list)
+        if hardcoded:
+            return False, (
+                f"it returns the visible tests' expected values as literals ({', '.join(hardcoded)}). "
+                "The grader calls it with other inputs: implement the general rule instead of "
+                "special-casing the examples"
+            )
         snippet = (
             "import json\n"
             f"_report = json.loads(run_tests(code={solution!r}, test_list={list(test_list)!r}))\n"
