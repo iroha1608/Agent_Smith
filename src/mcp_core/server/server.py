@@ -95,9 +95,12 @@ class MCPServer:
 
     def _handle_initialize(self, params: dict[str, Any] | None) -> mcp.InitializeResult:
         """MCPサーバーのバージョンと機能と情報をオブジェクトにまとめて返す."""
-        mcp.InitializeRequestParams.model_validate(params)
-        # versionが異なる場合も接続を切るかどうかはクライアント側が判断するのでエラーは吐かない
-        return mcp.InitializeResult(protocol_version=mcp.MCP_VERSION,
+        request = mcp.InitializeRequestParams.model_validate(params)
+        # クライアントが求めた版に対応していればその版で、そうでなければ最新版で応答する。
+        # 版が合わない場合に接続を切るかどうかはクライアント側が判断するのでエラーは吐かない
+        version = request.protocol_version if request.protocol_version in mcp.SUPPORTED_VERSIONS \
+            else mcp.MCP_VERSION
+        return mcp.InitializeResult(protocol_version=version,
                                     capabilities=self._capabilities(),  # tools/listなどを追加したあとはここに情報を乗せる必要がある、動的取得を設計予定
                                     server_info=self.server_info)
 

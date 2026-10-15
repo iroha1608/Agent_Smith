@@ -13,6 +13,8 @@ from enum import Enum
 
 
 MCP_VERSION: Final[Literal["2025-06-18"]] = "2025-06-18"
+# 受け入れるプロトコルバージョン(新しい順)。未知のサーバーが少し古い版で応答しても接続できるようにする
+SUPPORTED_VERSIONS: Final[tuple[str, ...]] = ("2025-06-18", "2025-03-26", "2024-11-05")
 
 
 class Method(str, Enum):
@@ -79,9 +81,15 @@ class Tool(MCPModel):
     input_schema: dict[str, Any]
 
 
+class PaginatedRequestParams(MCPModel):
+    """一覧系リクエスト(tools/list など)のパラメータ。続きを取るときに cursor を渡す."""
+    cursor: str | None = None
+
+
 class ListToolsResult(MCPModel):
     """tools/list リクエストへの応答のresult"""
     tools: list[Tool]
+    next_cursor: str | None = None
 
 
 class CallToolRequestParams(MCPModel):
@@ -127,6 +135,7 @@ class Resource(MCPModel):
 class ListResourcesResult(MCPModel):
     """resources/list リクエストへの応答の result."""
     resources: list[Resource]
+    next_cursor: str | None = None
 
 
 class ReadResourceRequestParams(MCPModel):
@@ -182,6 +191,7 @@ class Prompt(MCPModel):
 class ListPromptsResult(MCPModel):
     """prompts/list リクエストへの応答の result."""
     prompts: list[Prompt]
+    next_cursor: str | None = None
 
 
 class GetPromptRequestParams(MCPModel):

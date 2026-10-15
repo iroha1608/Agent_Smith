@@ -2,6 +2,7 @@
 
 import sys
 import json
+import resource
 import subprocess
 import tempfile
 import argparse
@@ -24,8 +25,37 @@ RESULT_MARKER = "__RUN_TESTS_RESULT__"
 # 1本に連結して `python -c` で実行すると、失敗時に「<string>の4行目でAssertionError」としか
 # 分からず、LLMがどのテストで何を返したのか知る手段が無かった(実測: 同じ誤答を5回繰り返した)。
 _RUNNER = r"""
-import ast, json, sys, traceback
+import ast, json, os, sys, traceback
 source, tests, marker = json.loads(sys.stdin.read())
+
+
+def _guard():
+    # 解答コードはホスト上で動くので、サンドボックスと同じく監査フックで危険な操作を止める
+    # (外部コマンド・通信・ネイティブコード・作業ディレクトリ外への書き込み / 読み取り)。
+    work = os.path.realpath(os.getcwd())
+    readable = [work] + sorted({os.path.realpath(p) for p in (sys.prefix, sys.base_prefix, sys.exec_prefix)})
+    denied = ("subprocess.Popen", "os.system", "os.exec", "os.posix_spawn", "os.spawn", "os.fork",
+              "os.forkpty", "os.kill", "os.killpg", "pty.spawn", "resource.setrlimit")
+
+    def inside(path, roots):
+        return any(path == r or path.startswith(r.rstrip("/") + "/") for r in roots)
+
+    def hook(event, args):
+        if event in denied or event.startswith(("socket.", "ctypes.")):
+            raise PermissionError(event + " is not allowed while running tests")
+        if event == "open" and args and not isinstance(args[0], int):
+            path = os.path.realpath(os.fsdecode(args[0]))
+            mode = args[1] if len(args) > 1 else None
+            flags = args[2] if len(args) > 2 else None
+            writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or \
+                (isinstance(flags, int) and bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT)))
+            if not inside(path, [work] if writing else readable):
+                raise PermissionError("path outside the test directory: " + path)
+
+    sys.addaudithook(hook)
+
+
+_guard()
 namespace = {"__name__": "__main__"}
 results = []
 
@@ -72,6 +102,15 @@ print(marker + json.dumps(results))
 """
 
 
+def _limit_runner() -> None:
+    """検証用の子プロセスに資源の上限をかける(fork後・exec前に子プロセスの中で呼ばれる)."""
+    memory = 512 * 1024 * 1024
+    resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
+    resource.setrlimit(resource.RLIMIT_CPU, (TIMEOUT + 1, TIMEOUT + 1))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (10 * 1024 * 1024, 10 * 1024 * 1024))
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
 def _clip(text: str, limit: int) -> str:
     """長い文字列を上限文字数で切り詰める."""
     return text if len(text) <= limit else text[:limit] + "...[truncated]"
@@ -115,7 +154,7 @@ def run_tests(code: str, test_list: list[str]) -> str:
         with tempfile.TemporaryDirectory() as temp_dir:
             # 自動で削除される temp_dir 内で、環境変数を空にした隔離モードの子プロセスで実行
             result = subprocess.run([sys.executable, '-I', '-c', _RUNNER], input=payload, cwd=temp_dir, env={},
-                                    capture_output=True, text=True, timeout=TIMEOUT)
+                                    capture_output=True, text=True, timeout=TIMEOUT, preexec_fn=_limit_runner)
     except subprocess.TimeoutExpired:
         return json.dumps({"success": False, "message": "Timeout",
                            "output": f"Execution did not finish within {TIMEOUT} seconds "

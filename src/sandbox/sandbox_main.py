@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from src.models.sandbox_config import SandboxConfig
-from src.sandbox.code_lint import check_code, _BLOCKED
+from src.sandbox.code_lint import check_code, strip_provided_imports, _BLOCKED
 from src.sandbox.sandbox_helper import _send, _recv, _truncate
 from src.sandbox.sandbox_child import _child_main
 from src.models.output import ExecuteResult
@@ -37,6 +37,8 @@ class Sandbox:
         self._cmd_w = -1
         self._res_r = -1
         self._tool_truncated = False
+        # resources / prompts の一覧(マニュアル用)。あれば read_resource / get_prompt を名前空間に置く
+        self._catalog: list[tuple[str, list[Any]]] = []
         if mcp_stdio:
             self.client = MCPClient(StdioClientTransport(mcp_stdio))
         elif mcp_server:
@@ -50,6 +52,7 @@ class Sandbox:
                     tool.name: MCPToolFunction(self.client, tool)
                     for tool in self.client.list_tools()
                 }
+                self._catalog = self._load_catalog()
             except Exception:
                 self.client.close()
                 self.client = None
@@ -75,7 +78,7 @@ class Sandbox:
             os.close(cmd_w)
             os.close(res_r)
             try:
-                _child_main(self.config, cmd_r, res_w, sorted(self.tools))
+                _child_main(self.config, cmd_r, res_w, self._tool_params(), bool(self._catalog))
             finally:
                 os._exit(1)
         os.close(cmd_r)
@@ -136,11 +139,49 @@ class Sandbox:
         except ChildProcessError:
             pass
 
+    def _tool_params(self) -> dict[str, list[str]]:
+        """Tool name -> parameter names in input-schema order (for positional calls)."""
+        params: dict[str, list[str]] = {}
+        for name, tool in sorted(self.tools.items()):
+            schema: dict[str, Any] = getattr(tool, "input_schema", None) or {}
+            params[name] = list((schema.get("properties") or {}).keys())
+        return params
+
+    def _provided_names(self) -> frozenset[str]:
+        """Names the sandbox binds itself (tools, final_answer, resource / prompt relays)."""
+        extra = {"read_resource", "get_prompt"} if self._catalog else set()
+        return frozenset(self.tools) | {"final_answer"} | extra
+
+    def _load_catalog(self) -> list[tuple[str, list[Any]]]:
+        """Fetch the connected server's resources and prompts (empty if it offers none)."""
+        if self.client is None:
+            return []
+        catalog: list[tuple[str, list[Any]]] = []
+        for heading, fetch in (("Resources", self.client.list_resources),
+                               ("Prompts", self.client.list_prompts)):
+            try:
+                entries = list(fetch() or [])
+            except Exception:
+                continue
+            if entries:
+                catalog.append((heading, entries))
+        return catalog
+
     def run(self, code: str) -> ExecuteResult:
         """Check, exectue, and service tool calls untill the snippet ends."""
+        code, dropped = strip_provided_imports(code, self._provided_names())
         rejection = check_code(code, self.config, frozenset(self.tools))
         if rejection:
             return ExecuteResult(error=rejection)
+        result = self._run_checked(code)
+        if dropped:
+            note = (f"[NOTE] {', '.join(dropped)} {'is' if len(dropped) == 1 else 'are'} already available "
+                    "in the sandbox; the import was skipped (no import is needed).\n")
+            result = result.model_copy(update={"stdout": note + (result.stdout or "")})
+        return result
+
+    def _run_checked(self, code: str) -> ExecuteResult:
+        """Execute already-checked code and service tool calls until the snippet ends."""
 
         self._tool_truncated = False
         try:
@@ -155,16 +196,20 @@ class Sandbox:
             if not ready:
                 self.reset()
                 return ExecuteResult(
-                    error="worker unresponsive; killed and restarted"
+                    timeout=True,
+                    error=(f"timeout: the code ran past {self.config.max_execution_time_seconds}s and ignored "
+                           "the time limit, so the worker was killed and restarted. All names defined in "
+                           "earlier steps are gone; redefine what you need.")
                 )
             try:
                 message = _recv(self._res_r)
             except (EOFError, OSError, ValueError):
                 self.reset()
                 return ExecuteResult(
-                    error="worker died (likely memory limit); restarted"
+                    error=("the worker died (likely the memory limit) and was restarted. All names defined "
+                           "in earlier steps are gone; redefine what you need.")
                 )
-            if message.get("kind") == "tool_call":
+            if message.get("kind") in ("tool_call", "resource_read", "prompt_get"):
                 self._dispatch(message)
                 continue
             return self._to_result(message)
@@ -213,7 +258,8 @@ class Sandbox:
             f"(tool calls are not counted against this limit).",
             f"- Memory limit: {self.config.max_memory_mb}MB.",
             "- Unavaiable: " + ", ".join(sorted(_BLOCKED)),
-            "- Dunder attribute access (__class__, __globals__) is blocked.",
+            "- Dunder attribute access (__class__, __globals__) and private module attributes "
+            "(random._os) are blocked.",
             "",
             "## final_answer",
             ""
@@ -222,7 +268,8 @@ class Sandbox:
             "",
             "## Tools",
             "",
-            "Call these as normal Python functions, keywords arguments only.",
+            "Call these as normal Python functions (positional or keyword arguments). They are "
+            "already defined: do not import them.",
             "",
         ]
         if not self.tools:
@@ -237,32 +284,50 @@ class Sandbox:
     def _catalog_doc(self) -> list[str]:
         """List the connected server's resources and prompts for the manual.
 
-        The task requires tools, resources and prompts to be exposed, so the
-        manual names whatever the connected server advertises. A server that
-        offers none, or one that fails the query, simply contributes nothing.
+        The task requires tools, resources and prompts to be exposed (課題 V.2): they are
+        listed here and readable from the sandbox with read_resource() / get_prompt().
+        A server that offers none simply contributes nothing.
         """
-        if self.client is None:
+        if not self._catalog:
             return []
         lines: list[str] = []
-        for heading, fetch in (("Resources", self.client.list_resources),
-                               ("Prompts", self.client.list_prompts)):
-            try:
-                entries = fetch() or []
-            except Exception:
-                continue
-            if not entries:
-                continue
+        for heading, entries in self._catalog:
             lines.append(f"## {heading}")
             lines.append("")
+            if heading == "Resources":
+                lines.append("Read one with read_resource(uri) -> str.")
+            else:
+                lines.append("Render one with get_prompt(name, **arguments) -> str.")
             for entry in entries:
-                name = getattr(entry, "name", None) or getattr(entry, "uri", "") or str(entry)
+                name = getattr(entry, "uri", None) or getattr(entry, "name", "") or str(entry)
                 description = (getattr(entry, "description", "") or "").strip()
                 lines.append(f"- {name}: {description}" if description else f"- {name}")
             lines.append("")
         return lines
 
+    def _catalog_reply(self, message: dict[str, Any]) -> dict[str, Any]:
+        """Serve read_resource / get_prompt from the worker through the MCP client."""
+        reply: dict[str, Any] = {"result": None, "error": None}
+        if self.client is None:
+            reply["error"] = "no MCP server connected"
+            return reply
+        try:
+            if message.get("kind") == "resource_read":
+                contents = self.client.read_resource(str(message.get("uri", ""))).contents
+                reply["result"] = "\n".join(c.text or "" for c in contents)
+            else:
+                prompt = self.client.get_prompt(str(message.get("name", "")),
+                                                {str(k): str(v) for k, v in (message.get("arguments") or {}).items()})
+                reply["result"] = "\n".join(f"{m.role}: {m.content.text or ''}" for m in prompt.messages)
+        except Exception as exc:
+            reply["error"] = f"{type(exc).__name__}: {exc}"
+        return reply
+
     def _dispatch(self, message: dict[str, Any]) -> None:
         """Run one tool in the parent and send the reply back."""
+        if message.get("kind") in ("resource_read", "prompt_get"):
+            _send(self._cmd_w, self._catalog_reply(message))
+            return
         name = str(message.get("name", ""))
         handler = self.tools.get(name)
         reply: dict[str, Any] = {"result": None, "error": None}
@@ -301,7 +366,8 @@ class Sandbox:
         if kind == "interrupt":
             raise KeyboardInterrupt
         if kind == "exit":
-            raise SystemExit(message.get("code", 0))
+            code = message.get("code", 0)
+            raise SystemExit(code if isinstance(code, int) else 1)
         return ExecuteResult(value=message.get("value"), **base)
 
 
@@ -363,18 +429,26 @@ def main() -> int:
     parser.add_argument("-f", "--file", help="run a file and exit")
     args = parser.parse_args()
 
-    config = (
-        SandboxConfig.model_validate_json(
-            Path(args.config).read_text(encoding="utf-8")
+    if args.mcp_stdio and args.mcp_server:
+        print("sandbox: use either --mcp-stdio or --mcp-server, not both", file=sys.stderr)
+        return 2
+    try:
+        config = (
+            SandboxConfig.model_validate_json(
+                Path(args.config).read_text(encoding="utf-8")
+            )
+            if args.config else SandboxConfig()
         )
-        if args.config else SandboxConfig()
-    )
+    except (OSError, ValueError) as exc:
+        print(f"sandbox: cannot load config {args.config!r}: {exc}".splitlines()[0], file=sys.stderr)
+        return 1
+    try:
+        sandbox = Sandbox(config=config, mcp_stdio=args.mcp_stdio, mcp_server=args.mcp_server)
+    except Exception as exc:  # noqa: BLE001 - 接続失敗はトレースバックでなく1行で伝える
+        print(f"sandbox: cannot connect to the MCP server: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
 
-    with Sandbox(
-        config=config,
-        mcp_stdio=args.mcp_stdio,
-        mcp_server=args.mcp_server
-    ) as sandbox:
+    with sandbox:
         if args.command is not None:
             _show(sandbox.run(args.command))
         elif args.file is not None:

@@ -47,10 +47,10 @@ class MCPClient:
             except ValidationError as e:
                 raise mcp.MCPProtocolError(f"initializeの応答が不正です: {result}") from e
 
-            # versionを検証する
-            if init.protocol_version != mcp.MCP_VERSION:
+            # versionを検証する(対応している版なら、サーバーが選んだ版で話す)
+            if init.protocol_version not in mcp.SUPPORTED_VERSIONS:
                 raise mcp.MCPProtocolError(f"未対応のプロトコルバージョン: {init.protocol_version}")
-            self.transport.set_protocol_version(mcp.MCP_VERSION)
+            self.transport.set_protocol_version(init.protocol_version)
 
             # 保存してサーバーへ通知
             self.server_info = init.server_info
@@ -68,14 +68,18 @@ class MCPClient:
         if "tools" not in self.server_capabilities:
             return []
 
-        result = self._request(mcp.Method.TOOLS_LIST)
-
-        try:
-            t_list = mcp.ListToolsResult.model_validate(result)
-        except ValidationError as e:
-            raise mcp.MCPProtocolError(f"tools/listの応答が不正です: {result}") from e
-
-        return t_list.tools
+        tools: list[mcp.Tool] = []
+        cursor: str | None = None
+        while True:  # nextCursor がある限り続きを取る(ページ送り)
+            result = self._request(mcp.Method.TOOLS_LIST, mcp.PaginatedRequestParams(cursor=cursor) if cursor else None)
+            try:
+                t_list = mcp.ListToolsResult.model_validate(result)
+            except ValidationError as e:
+                raise mcp.MCPProtocolError(f"tools/listの応答が不正です: {result}") from e
+            tools.extend(t_list.tools)
+            cursor = t_list.next_cursor
+            if not cursor:
+                return tools
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> mcp.CallToolResult:
         """サーバーにツール実行を依頼し、結果を受け取る"""
@@ -93,11 +97,19 @@ class MCPClient:
         """サーバーに資料の一覧を依頼する."""
         if "resources" not in self.server_capabilities:   # 資料の機能が無いサーバーには頼まない
             return []
-        result = self._request(mcp.Method.RESOURCES_LIST)
-        try:
-            return mcp.ListResourcesResult.model_validate(result).resources
-        except ValidationError as e:
-            raise mcp.MCPProtocolError(f"resources/listの応答が不正です: {result}") from e
+        resources: list[mcp.Resource] = []
+        cursor: str | None = None
+        while True:
+            result = self._request(mcp.Method.RESOURCES_LIST,
+                                   mcp.PaginatedRequestParams(cursor=cursor) if cursor else None)
+            try:
+                page = mcp.ListResourcesResult.model_validate(result)
+            except ValidationError as e:
+                raise mcp.MCPProtocolError(f"resources/listの応答が不正です: {result}") from e
+            resources.extend(page.resources)
+            cursor = page.next_cursor
+            if not cursor:
+                return resources
 
     def read_resource(self, uri: str) -> mcp.ReadResourceResult:
         """URI を指定して、資料の中身を読む."""
@@ -113,11 +125,19 @@ class MCPClient:
         """サーバーに指示の雛形の一覧を依頼する."""
         if "prompts" not in self.server_capabilities:
             return []
-        result = self._request(mcp.Method.PROMPTS_LIST)
-        try:
-            return mcp.ListPromptsResult.model_validate(result).prompts
-        except ValidationError as e:
-            raise mcp.MCPProtocolError(f"prompts/listの応答が不正です: {result}") from e
+        prompts: list[mcp.Prompt] = []
+        cursor: str | None = None
+        while True:
+            result = self._request(mcp.Method.PROMPTS_LIST,
+                                   mcp.PaginatedRequestParams(cursor=cursor) if cursor else None)
+            try:
+                page = mcp.ListPromptsResult.model_validate(result)
+            except ValidationError as e:
+                raise mcp.MCPProtocolError(f"prompts/listの応答が不正です: {result}") from e
+            prompts.extend(page.prompts)
+            cursor = page.next_cursor
+            if not cursor:
+                return prompts
 
     def get_prompt(self, name: str, arguments: dict[str, str] | None = None) -> mcp.GetPromptResult:
         """雛形の名前と引数を渡して、埋めたメッセージを受け取る."""

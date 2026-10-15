@@ -14,6 +14,13 @@ _BLOCKED = frozenset({
 })
 
 
+# 許可モジュールが内部で遅延 import する補助モジュール。C実装の関数(datetime.strptime など)は
+# 呼び出し元(=サンドボックスのコード)の __import__ を使って import するため、ここで通さないと
+# 許可モジュールの通常の機能が ImportError になる。静的チェックでは許可しないので、
+# コードに直接 `import _strptime` と書いた場合は従来どおり拒否される。
+_IMPLICIT_IMPORTS = frozenset({"_strptime"})
+
+
 def _allowed(name: str, authorized: frozenset[str]) -> bool:
     """Match a module name against the allowlist."""
     return name in authorized or any(
@@ -33,6 +40,9 @@ class _Checker(ast.NodeVisitor):
         self.authorized: frozenset[str] = authorized
         self.tool_names = tool_names
         self.errors: list[str] = []
+        # 許可モジュールの名前(とこのスニペットでの別名)。これらの `_` 始まりの属性
+        # (random._os, string._re など)は内部実装で、許可外のモジュールへの抜け道になる。
+        self.module_names: set[str] = {entry.split(".")[0] for entry in authorized}
 
     def _check_module(self, name: str) -> None:
         """Check if importing named module is allowed."""
@@ -45,6 +55,7 @@ class _Checker(ast.NodeVisitor):
         """Visit all nodes."""
         for alias in node.names:
             self._check_module(alias.name)
+            self.module_names.add(alias.asname or alias.name.split(".")[0])
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
@@ -56,9 +67,16 @@ class _Checker(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:  # noqa: N802
-        """Blocks dunder access, which reaches globals and subclasses."""
+        """Blocks dunder access, which reaches globals and subclasses.
+
+        Also blocks private attributes of modules (random._os ...), a static first line of
+        defence; the audit hook in the worker is what actually enforces the restrictions.
+        """
         if node.attr.startswith("__") and node.attr.endswith("__"):
             self.errors.append(f"access to dunder attribute {node.attr!r}")
+        elif node.attr.startswith("_") and isinstance(node.value, ast.Name) \
+                and node.value.id in self.module_names:
+            self.errors.append(f"access to private module attribute {node.value.id}.{node.attr}")
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
@@ -69,6 +87,47 @@ class _Checker(ast.NodeVisitor):
         if node.id in _BLOCKED and node.id not in self.tool_names:
             self.errors.append(f"use of {node.id!r} is not allowed")
         self.generic_visit(node)
+
+
+def strip_provided_imports(code: str, provided: frozenset[str]) -> tuple[str, list[str]]:
+    """Drop `import <name>` of names the sandbox already provides (tools, final_answer...).
+
+    Models trained on other frameworks write `import json, run_tests, final_answer`. The tools
+    are not modules, so the import would fail and the whole snippet would not run (実測:
+    gpt-oss, MBPP 444). Removing just those names keeps the rest of the statement and leaves
+    the provided objects untouched. `from x import name` is left alone (it is a real import).
+
+    Args:
+        code (str): the snippet.
+        provided (frozenset[str]): names already bound in the sandbox namespace.
+
+    Returns:
+        tuple[str, list[str]]: (code to run, names whose import was dropped).
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code, []
+    dropped: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import):
+            continue
+        kept = []
+        for alias in node.names:
+            if alias.name in provided and alias.asname in (None, alias.name):
+                dropped.append(alias.name)
+            else:
+                kept.append(alias)
+        node.names = kept
+    if not dropped:
+        return code, []
+
+    class _DropEmptyImports(ast.NodeTransformer):
+        def visit_Import(self, node: ast.Import) -> ast.AST:  # noqa: N802
+            return node if node.names else ast.Pass()
+
+    tree = ast.fix_missing_locations(_DropEmptyImports().visit(tree))
+    return ast.unparse(tree), dropped
 
 
 def check_code(
@@ -118,10 +177,12 @@ def _safe_builtins(config: SandboxConfig) -> dict[str, Any]:
 
     def guarded(name: str, *args: Any, **kwargs: Any) -> Any:
         """Enforcement point: every import compiles to this."""
-        if not _allowed(name, authorized):
+        if not _allowed(name, authorized) and name not in _IMPLICIT_IMPORTS:
             raise ImportError(f"import of {name!r} not allowed")
         return real(name, *args, **kwargs)
 
     safe["__import__"] = guarded
     safe["open"] = _guarded_open(config)
+    # `class` 文は __build_class__ を呼ぶ。無いとクラスが一切定義できない(MBPPの解答で使う)
+    safe["__build_class__"] = builtins.__build_class__
     return safe
