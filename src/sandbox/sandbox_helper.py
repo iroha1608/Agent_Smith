@@ -28,6 +28,14 @@ def _tool_proxy(name: str, params: list[str], out_fd: int, in_fd: int) -> Callab
             if param in kwargs:
                 raise TypeError(f"{name}() got multiple values for argument {param!r}")
             kwargs[param] = value
+        # MCPサーバーは未知の引数を黙って捨てるので、捨てたことを伝える(実測: search_code(filepath=...) と
+        # 書いたモデルが、1ファイルに絞れたと思い込んでリポジトリ全体の検索結果を読んでいた)
+        unknown = [key for key in kwargs if params and key not in params]
+        if unknown:
+            for key in unknown:
+                kwargs.pop(key)
+            print(f"[NOTE] {name}() has no parameter {', '.join(map(repr, unknown))}, so "
+                  f"{'it was' if len(unknown) == 1 else 'they were'} ignored. Parameters: {', '.join(params)}.")
         return _relay(out_fd, in_fd, {"kind": "tool_call", "name": name, "arguments": kwargs},
                       f"tool {name!r}")
     proxy.__name__ = name

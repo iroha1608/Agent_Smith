@@ -77,6 +77,34 @@ def test_search_tools_use_the_required_format(repo: Path) -> None:
     assert "not a valid Python identifier" in ws.find_references("1bad")
 
 
+@pytest.mark.parametrize("file_pattern", [
+    "calc/ops.py",          # リポジトリからの相対パス
+    "{repo}/calc/ops.py",   # 絶対パス
+    "calc/*.py",            # ディレクトリ付きの glob
+    "**/*.py",              # 再帰 glob
+    "*/calc/ops.py",        # 先頭がワイルドカードの部分パス
+    "calc",                 # ディレクトリ
+    "ops.py",               # ワイルドカード無しのファイル名
+    "./calc/",              # ./ 付き・末尾スラッシュ付きのディレクトリ
+])
+def test_search_code_accepts_path_patterns(repo: Path, file_pattern: str) -> None:
+    """パスで絞り込んでも見つかる(実測: モデルの多くがパスを渡し、ファイル名だけを見る grep では毎回0件だった)."""
+    ws = _workspace(repo)
+    found = ws.search_code("return a \\* b", file_pattern.format(repo=repo))
+    assert found == f"{repo}/calc/ops.py:2     return a * b"
+
+
+def test_search_code_path_patterns_report_why_nothing_was_found(repo: Path) -> None:
+    """対象ファイルが無いのか、ファイルはあるが一致しないのかを区別して返す."""
+    ws = _workspace(repo)
+    assert ws.search_code("divide", "calc/nope.py").startswith("No files match 'calc/nope.py'")
+    assert ws.search_code("no_such_symbol_xyz", "calc/*.py") == \
+        "No matches found for pattern 'no_such_symbol_xyz' in calc/*.py."
+    assert ws.search_code("(unclosed", "calc/*.py").startswith("Error: ")
+    # tests/ は calc/*.py に含まれない
+    assert ws.search_code("import divide", "calc/*.py").startswith("No matches found")
+
+
 def test_get_patch_includes_new_files_and_excludes_eval_test_files(repo: Path, tmp_path: Path) -> None:
     eval_script = tmp_path / "eval.sh"
     base = _git(repo, "rev-parse", "HEAD").strip()

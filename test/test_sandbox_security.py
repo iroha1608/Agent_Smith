@@ -151,6 +151,24 @@ def test_mcp_tools_accept_positional_args_and_skip_provided_imports() -> None:
     assert result.stdout.strip().endswith("True")
 
 
+def test_unknown_tool_names_and_arguments_are_explained() -> None:
+    """存在しないツールの呼び出しには一覧と近い名前を、未知の引数には無視したことを伝える."""
+    command = f"{sys.executable} {_REPO / 'mcp_tools_mbpp.py'}"
+    with Sandbox(config=SandboxConfig(max_execution_time_seconds=10), mcp_stdio=command) as box:
+        unknown_tool = box.run("print(run_test('def f():\\n    return 1', ['assert f() == 1']))")
+        undefined_variable = box.run("print(N.x)")
+        extra_argument = box.run("import json\nprint(json.loads(run_tests(code='def f():\\n    return 1', "
+                                 "test_list=['assert f() == 1'], verbose=True))['success'])")
+    assert "NameError: name 'run_test' is not defined" in (unknown_tool.error or "")
+    assert "Available tools: final_answer, run_tests" in (unknown_tool.error or "")
+    assert "Did you mean run_tests?" in (unknown_tool.error or "")
+    # 呼び出していない名前(変数の定義忘れ)には一覧を付けない
+    assert "Available tools" not in (undefined_variable.error or "")
+    assert extra_argument.error is None, extra_argument.error
+    assert extra_argument.stdout.splitlines() == [
+        "[NOTE] run_tests() has no parameter 'verbose', so it was ignored. Parameters: code, test_list.", "True"]
+
+
 def test_unknown_server_resources_prompts_and_tools(tmp_path: Path) -> None:
     """未知のMCPサーバーでも、ツール・resources・prompts を動的に発見して使える."""
     server = tmp_path / "other_server.py"

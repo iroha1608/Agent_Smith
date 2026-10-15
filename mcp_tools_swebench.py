@@ -117,7 +117,8 @@ def list_files(directory: str = ".", pattern: str = "*") -> str:
 def search_code(pattern: str, file_pattern: str = "*") -> str:
     """Grep-like regex search over the repository.
 
-    Output lines: "/absolute/path/to/file.py:<line_number> <line_content>". file_pattern is a glob such as "*.py".
+    Output lines: "/absolute/path/to/file.py:<line_number> <line_content>". file_pattern is a file name glob
+    such as "*.py", or a path such as "pkg/module.py", "pkg/sub/*.py" or a directory to search only there.
     """
     return _ws().search_code(pattern, file_pattern)
 

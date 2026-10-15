@@ -47,6 +47,26 @@ _FAILING_PATTERNS = (
     re.compile(r"^(test_\w+) +[EF]\s*$"),
 )
 
+
+def _path_glob(file_pattern: str) -> str:
+    """パスや素の名前の file_pattern を find -path 用の glob にする.
+
+    find -path の `*` は `/` もまたぐので、`**` は `*` と同じ意味に畳む。相対パスは先頭に `*/` を付け、
+    リポジトリのルートからのパスでも途中からの部分パス("physics/vector/vector.py")や素の名前("ops.py")でも
+    合うようにする。
+
+    Args:
+        file_pattern (str): パスの glob(例: "sympy/core/*.py"、"/testbed/a.py"、"**/*.py"、"calc")。
+
+    Returns:
+        str: find -path に渡す glob。
+    """
+    glob = file_pattern.rstrip("/") or "/"
+    if not glob.startswith("/"):
+        glob = "*/" + (glob[2:] if glob.startswith("./") else glob)
+    return glob.replace("**/", "*").replace("**", "*")
+
+
 _READ_SCRIPT = r'''
 import io, json, os, sys
 a = json.loads(sys.stdin.read())
@@ -430,15 +450,41 @@ class SweWorkspace:
     def search_code(self, pattern: str, file_pattern: str = "*") -> str:
         """正規表現(grep -E)でコードを検索する.
 
+        file_pattern がワイルドカード入りのファイル名(例: "*.py")なら、その名前のファイルをリポジトリ全体から探す。
+        それ以外(パスや素の名前)は、その名前のファイルか、その名前のディレクトリの中を探す。パスは絶対パス・
+        リポジトリからの相対パス・途中からの部分パスのどれでもよい。実測では多くのモデルが
+        "sympy/physics/vector/*.py" や "/testbed/a/b.py"、"**/*.py" のようにパスで絞り込み、ファイル名しか
+        見ない grep --include では毎回0件になっていた(gpt-oss-20b は sympy-14711 で11回空振りし、
+        修正箇所に辿り着けないまま上限に達した)。
+
         Args:
             pattern (str): 検索する正規表現。
-            file_pattern (str): 対象ファイル名のglob(例: "*.py")。
+            file_pattern (str): 対象ファイルの glob(ファイル名またはパス)。
 
         Returns:
             str: `/abs/path:<行番号> <内容>` の一覧。
         """
-        return self._grep(f"-E --include={shlex.quote(file_pattern)} -e {shlex.quote(pattern)}",
-                          f"pattern {pattern!r} in {file_pattern}")
+        file_pattern = (file_pattern or "*").strip()
+        what = f"pattern {pattern!r} in {file_pattern}"
+        if "/" not in file_pattern and any(char in file_pattern for char in "*?["):
+            return self._grep(f"-E --include={shlex.quote(file_pattern)} -e {shlex.quote(pattern)}", what)
+        path_glob = _path_glob(file_pattern)
+        # 対象ファイルが1つも無いときは終了コード3で知らせる(「ファイルはあるが一致なし」と区別する)
+        command = (f"files=$(find {shlex.quote(self.testbed)} -name .git -prune -o -type f "
+                   f"\\( -path {shlex.quote(path_glob)} -o -path {shlex.quote(path_glob + '/*')} \\) -print); "
+                   "if [ -z \"$files\" ]; then exit 3; fi; "
+                   f"printf '%s\\n' \"$files\" | xargs -d '\\n' grep -nIH -E -e {shlex.quote(pattern)}")
+        result = self._run(command)
+        if isinstance(result, str):
+            return result
+        if result.exit_code == 3 and not result.stdout:
+            return (f"No files match {file_pattern!r}. Check the path with list_files, "
+                    "or pass a file name glob such as '*.py'.")
+        if not result.stdout:
+            # xargs は一致なしでも grep のエラーでも 123 を返すので、標準エラーの有無で見分ける
+            error = result.stderr.strip()
+            return f"Error: {error[:500]}" if error else f"No matches found for {what}."
+        return self._limited(self._grep_lines(result.stdout), "matches")
 
     def search_function_or_class_definition_in_code(self, name: str) -> str:
         """関数・クラスの定義(def / async def / class)を .py ファイルから探す.

@@ -50,6 +50,7 @@ SALVAGE_UNFENCED = "unfenced"
 SALVAGE_ESCAPED_QUOTES = "escaped_quotes"
 SALVAGE_JSON_WRAPPED = "json_wrapped"
 SALVAGE_MULTIPLE_BLOCKS = "multiple_blocks"
+SALVAGE_UNMATCHED_CLOSERS = "unmatched_closers"
 
 # 停止シーケンスの「前半だけ」が本文末尾に漏れたものを取り除くときの最短長。
 # 1文字("<"など)は正当なコードの末尾でもあり得るので対象にしない。
@@ -159,6 +160,38 @@ def _repair_escaped_quotes(code: str) -> str | None:
     return None
 
 
+# 文字列の中の括弧まで数えて、閉じ括弧を多く書くモデルがある。実測(nemotron-3-super, sympy-14711):
+# print(run_command(command="python -c \"print(sum([a, (0 * b)]))\"")))) のように `)` を1〜2個多く書き、
+# 「unmatched ')'」を8反復続けた(1個だけ消しては、もう1個残っていて失敗する、を繰り返した)。
+# Pythonの構文解析器は余った閉じ括弧の位置を正確に返すので、その1文字だけを消して解析し直す。
+_UNMATCHED_CLOSER = re.compile(r"^unmatched '([)\]}])'")
+_MAX_CLOSER_REMOVALS = 5
+
+
+def _repair_unmatched_closers(code: str) -> str | None:
+    """構文解析器が「対応しない閉じ括弧」と報告した文字だけを取り除き、構文が通る形を探す.
+
+    Args:
+        code (str): 抽出したコード。
+
+    Returns:
+        str | None: 修復できたコード。もともと構文が通る場合や、別の原因の構文エラーならNone。
+    """
+    lines = code.split("\n")
+    for attempt in range(_MAX_CLOSER_REMOVALS + 1):
+        try:
+            ast.parse("\n".join(lines))
+            return "\n".join(lines) if attempt else None
+        except SyntaxError as error:
+            match = _UNMATCHED_CLOSER.match(error.msg or "")
+            index, column = (error.lineno or 0) - 1, (error.offset or 0) - 1
+            if match is None or not 0 <= index < len(lines) or not 0 <= column < len(lines[index]) \
+                    or lines[index][column] != match.group(1):
+                return None
+            lines[index] = lines[index][:column] + lines[index][column + 1:]
+    return None
+
+
 def _extract_with_kind(llm_output: str) -> tuple[str | None, str | None]:
     """コードを抽出し、崩れを救済した場合はその種類も返す.
 
@@ -206,6 +239,9 @@ def _extract_with_kind(llm_output: str) -> tuple[str | None, str | None]:
     repaired = _repair_escaped_quotes(code)
     if repaired is not None:
         return repaired, SALVAGE_ESCAPED_QUOTES
+    repaired = _repair_unmatched_closers(code)
+    if repaired is not None:
+        return repaired, SALVAGE_UNMATCHED_CLOSERS
     return code, kind
 
 

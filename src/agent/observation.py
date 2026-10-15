@@ -11,6 +11,7 @@ from src.agent.extractor.python_extractor import (
     SALVAGE_MULTIPLE_BLOCKS,
     SALVAGE_UNCLOSED_FENCE,
     SALVAGE_UNFENCED,
+    SALVAGE_UNMATCHED_CLOSERS,
 )
 from src.models.output import ExecuteResult
 
@@ -194,6 +195,12 @@ _MALFORMED_NOTES: dict[str, str] = {
         "[MALFORMED_CODE] Your ```python block contained a JSON object like {\"code\": \"...\"} "
         "instead of Python. I took the string under \"code\" and executed it as Python. Write the "
         "Python statements directly inside the block."
+    ),
+    SALVAGE_UNMATCHED_CLOSERS: (
+        "[MALFORMED_CODE] Your code had more closing brackets than opening ones (a SyntaxError: "
+        "unmatched ')'), usually from counting the brackets inside a string literal. I removed only "
+        "the extra closing brackets the Python parser reported and ran the code. Brackets inside "
+        "quotes do not need closing outside them."
     ),
     SALVAGE_MULTIPLE_BLOCKS: (
         "[NOTE] Your message had several ```python blocks. I joined them in order and executed "

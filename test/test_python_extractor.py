@@ -5,6 +5,7 @@ from src.agent.extractor.python_extractor import (
     SALVAGE_ESCAPED_QUOTES,
     SALVAGE_UNCLOSED_FENCE,
     SALVAGE_UNFENCED,
+    SALVAGE_UNMATCHED_CLOSERS,
     PythonCodeExtractor,
     salvage_kind,
 )
@@ -139,6 +140,31 @@ def test_repair_keeps_legitimate_escapes_inside_triple_quotes(extractor: PythonC
     exec(code, namespace)                      # 実行しても docstring が壊れていない
     assert '"""doc."""' in str(namespace["solution"])
     assert salvage_kind(text) is None          # もともと構文が通るので救済扱いにしない
+
+
+def test_extra_closing_brackets_are_removed(extractor: PythonCodeExtractor) -> None:
+    """文字列内の括弧まで数えて書き足した閉じ括弧だけを取り除く.
+
+    実測(nemotron-3-super, sympy-14711 step 10): 下の行を書き、unmatched ')' を8反復続けた。
+    """
+    line = ('print(run_command(command="cd /testbed && python -c \\"from x import N; '
+            'print(sum([N.x, (0 * N.x)]))\\""))))')
+    text = f"Thought: test it.\n```python\n{line}\n```"
+    code = extractor.extract(text)
+    assert code == line[:-2]                  # 余分な2個だけが消え、文字列の中は変わらない
+    compile(code, "<test>", "exec")
+    assert salvage_kind(text) == SALVAGE_UNMATCHED_CLOSERS
+
+
+@pytest.mark.parametrize("source", [
+    "def f(:\n    pass)",       # 閉じ括弧の余りではない構文エラー
+    "print((1)",                # 閉じ括弧が足りない(どこに足すかは推測しない)
+])
+def test_other_syntax_errors_are_not_rewritten(extractor: PythonCodeExtractor, source: str) -> None:
+    """閉じ括弧の余り以外の構文エラーは書き換えず、そのまま実行させて構文エラーを返す."""
+    text = f"```python\n{source}\n```"
+    assert extractor.extract(text) == source
+    assert salvage_kind(text) is None
 
 
 def test_valid_code_is_left_untouched(extractor: PythonCodeExtractor) -> None:

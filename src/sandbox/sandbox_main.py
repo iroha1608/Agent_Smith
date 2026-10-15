@@ -14,10 +14,15 @@ from typing import Any, Callable
 from pathlib import Path
 import os
 import ast
+import difflib
+import re
 import sys
 import select
 import signal
 import argparse
+
+# The last line of a traceback for a name that does not exist
+_UNDEFINED_NAME = re.compile(r"NameError: name '(\w+)' is not defined")
 
 
 class Sandbox:
@@ -173,12 +178,36 @@ class Sandbox:
         rejection = check_code(code, self.config, frozenset(self.tools))
         if rejection:
             return ExecuteResult(error=rejection)
-        result = self._run_checked(code)
+        result = self._explain_unknown_call(code, self._run_checked(code))
         if dropped:
             note = (f"[NOTE] {', '.join(dropped)} {'is' if len(dropped) == 1 else 'are'} already available "
                     "in the sandbox; the import was skipped (no import is needed).\n")
             result = result.model_copy(update={"stdout": note + (result.stdout or "")})
         return result
+
+    def _explain_unknown_call(self, code: str, result: ExecuteResult) -> ExecuteResult:
+        """Add the tool list (and the closest names) to a NameError raised by calling an unknown function.
+
+        Measured: nemotron-3-super wrote search_file(...) for search_code(...) on sympy-14711 and, seeing
+        only "name 'search_file' is not defined", spent two more iterations guessing other names.
+        """
+        match = _UNDEFINED_NAME.search(result.error or "")
+        if match is None or not self.tools:
+            return result
+        name = match.group(1)
+        try:
+            called = any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name
+                         for node in ast.walk(ast.parse(code)))
+        except SyntaxError:
+            return result
+        if not called:
+            return result
+        names = sorted(self._provided_names())
+        hint = f"\n{name}() is not an available tool. Available tools: {', '.join(names)}."
+        close = difflib.get_close_matches(name, names, n=2, cutoff=0.6)
+        if close:
+            hint += f" Did you mean {' or '.join(close)}?"
+        return result.model_copy(update={"error": (result.error or "") + hint})
 
     def _run_checked(self, code: str) -> ExecuteResult:
         """Execute already-checked code and service tool calls until the snippet ends."""
