@@ -79,6 +79,17 @@ class SWEBenchProfile(TaskProfile):
     latest_observation_max_chars = 8000
     assistant_max_chars = 2000
     rotate_after_misses = None
+    # 残り4反復で促す(テストの実行・パッチの確認・提出に数反復かかるため)
+    iteration_warn_at = 4
+
+    def submit_hint(self) -> str:
+        """SWE-bench の提出の段取りを返す.
+
+        Returns:
+            str: 提出の促し。
+        """
+        return ("Stop exploring: if your fix is in place, run run_tests() once and submit with "
+                "final_answer(get_patch()). If no fix is in place yet, make the most likely minimal edit now.")
 
     def format_rules(self) -> str:
         """SWE-bench用の出力形式のルールを返す.

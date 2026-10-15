@@ -17,6 +17,7 @@ from src.agent.extractor.python_extractor import salvage_kind, strip_stop_sequen
 from src.agent.observation import (
     budget_note,
     build_observation,
+    iteration_note,
     malformed_code_note,
     observation_no_code,
     repeated_code_note,
@@ -317,12 +318,16 @@ class Orchestrator:
             str: 必要なら警告文を足したObservation文字列。
         """
         remaining = tracker.remaining_output_tokens()
-        if remaining > self.limits.max_output_tokens_per_iteration * self._BUDGET_WARN_FACTOR:
-            return observation
-        if remaining <= 0:
-            # 次の反復は制限チェックで打ち切られるため、促しても送られない。
-            return observation
-        return f"{observation}\n{budget_note(remaining)}"
+        if 0 < remaining <= self.limits.max_output_tokens_per_iteration * self._BUDGET_WARN_FACTOR:
+            # (0以下なら次の反復は制限チェックで打ち切られるため、促しても送られない)
+            return f"{observation}\n{budget_note(remaining)}"
+        # 反復回数の残りが少なくなったら、提出の段取りに入るよう促す。実測(nemotron-3-ultra,
+        # SWE 13480): 3反復目で正しい修正を入れたのに、確認の run_command を27回繰り返して
+        # run_tests も提出もしないまま上限に達した。
+        iterations_left = self.limits.max_iterations - tracker.iterations
+        if 0 < iterations_left <= self.profile.iteration_warn_at:
+            return f"{observation}\n{iteration_note(iterations_left, self.profile.submit_hint())}"
+        return observation
 
     def _estimate_tokens(self, messages: list[dict[str, str]]) -> int:
         """これから送るメッセージ列の入力トークン数を概算する.

@@ -163,3 +163,17 @@ def test_mcp_endpoint_defaults_to_own_server_over_stdio() -> None:
     assert McpEndpoint(server="http://127.0.0.1:9/mcp").resolve("x.py") == (None, "http://127.0.0.1:9/mcp")
     with pytest.raises(ValueError):
         McpEndpoint(stdio="a", server="b")
+
+
+def test_iteration_budget_note_asks_to_submit_near_the_limit() -> None:
+    """残りの反復が少なくなったら、テストを実行して get_patch() で提出するよう促す."""
+    llm = _ScriptedLLM()
+    orchestrator = Orchestrator(
+        provider=llm, extractor=PythonCodeExtractor(), sandbox=_PatchSandbox(_PATCH), profile=SWEBenchProfile(),
+        limits=Limits(max_iterations=6, max_input_tokens=10**6, max_output_tokens=10**6,
+                      max_output_tokens_per_iteration=100, total_time_sec=10**6, time_margin_sec=1.0),
+    )
+    solution = orchestrator.run("demo__demo-1", "swebench", "Issue: fix it")
+    notes = ["[BUDGET] Only" in step.sandbox_output for step in solution.steps]
+    assert notes == [False, True, True, True, True, False]  # 残り4/3/2/1回で促し、最後は送られないので付けない
+    assert "final_answer(get_patch())" in solution.steps[1].sandbox_output

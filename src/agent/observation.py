@@ -160,6 +160,20 @@ def budget_note(remaining_output_tokens: int) -> str:
     )
 
 
+def iteration_note(iterations_left: int, submit_hint: str) -> str:
+    """反復回数の残りが少ないことを伝え、提出の段取りに入るよう促す一文を返す.
+
+    Args:
+        iterations_left (int): このタスクに残っている反復回数。
+        submit_hint (str): タスク種別ごとの提出のしかた(プロファイルが決める)。
+
+    Returns:
+        str: Observationの末尾に付ける警告文。
+    """
+    plural = "iteration remains" if iterations_left == 1 else "iterations remain"
+    return f"[BUDGET] Only {iterations_left} {plural} for this task. {submit_hint}"
+
+
 _MALFORMED_NOTES: dict[str, str] = {
     SALVAGE_UNCLOSED_FENCE: (
         "[MALFORMED_CODE] Your ```python block was never closed, so your response was cut off "
