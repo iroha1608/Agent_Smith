@@ -225,7 +225,7 @@ are under [`benchmark/`](benchmark/).
   acting through code instead of JSON tool calls.
 - Model Context Protocol specification — https://modelcontextprotocol.io/specification
 - PEP 578 — Python Runtime Audit Hooks; Python docs for `resource`, `signal`, `subprocess`.
-- OpenAI-compatible Chat Completions APIs of Groq, Mistral, Cohere, Google AI Studio, NVIDIA NIM and
+- OpenAI-compatible Chat Completions APIs of Groq, Mistral, Cohere, Google AI Studio, NVIDIA NIM, Ollama Cloud and
   OpenRouter (official documentation of each provider).
 
 ### How AI was used

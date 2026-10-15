@@ -33,6 +33,25 @@
             }
         },
         {
+            "name": "ollama",
+            "provider_url": "https://ollama.com/v1",
+            "models": [
+                "gemma4:31b",
+                "gpt-oss:120b",
+                "nemotron-3-super"
+            ],
+            "keys_env": "OLLAMA_API_KEY",
+            "priority": 3,
+            "model_params": {
+                "gpt-oss:120b": {
+                    "reasoning_effort": "low"
+                },
+                "nemotron-3-super": {
+                    "reasoning_effort": "none"
+                }
+            }
+        },
+        {
             "name": "cohere",
             "provider_url": "https://api.cohere.ai/compatibility/v1",
             "models": [
@@ -40,7 +59,7 @@
                 "command-a-reasoning-08-2025"
             ],
             "keys_env": "COHERE_API_KEY",
-            "priority": 3,
+            "priority": 4,
             "model_params": {
                 "command-a-reasoning-08-2025": {
                     "reasoning_effort": "none"
@@ -55,7 +74,7 @@
                 "gemma-4-31b-it"
             ],
             "keys_env": "GEMINI_API_KEY",
-            "priority": 4,
+            "priority": 5,
             "model_params": {
                 "gemini-3.5-flash-lite": {
                     "reasoning_effort": "minimal"
@@ -70,7 +89,7 @@
                 "nvidia/nemotron-3.5-lightning-30b-a3b"
             ],
             "keys_env": "NVIDIA_API_KEY",
-            "priority": 5,
+            "priority": 6,
             "model_params": {
                 "nvidia/nemotron-3-super-120b-a12b": {
                     "chat_template_kwargs": {
@@ -93,7 +112,7 @@
                 "google/gemma-4-31b-it:free"
             ],
             "keys_env": "OPENROUTER_API_KEY",
-            "priority": 6
+            "priority": 7
         }
     ]
 }
