@@ -37,8 +37,8 @@
             "provider_url": "https://ollama.com/v1",
             "models": [
                 "gemma4:31b",
-                "gpt-oss:120b",
-                "nemotron-3-super"
+                "nemotron-3-super",
+                "gpt-oss:120b"
             ],
             "keys_env": "OLLAMA_API_KEY",
             "priority": 3,

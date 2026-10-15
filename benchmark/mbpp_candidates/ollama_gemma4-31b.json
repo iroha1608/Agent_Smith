@@ -1,0 +1,140 @@
+{
+  "timestamp": "2026-10-15_18-30-46",
+  "providers_file": "tools/smoke/candidates/ollama_gemma4-31b.json",
+  "count": 5,
+  "seed": 1,
+  "workers": 1,
+  "passed": 9,
+  "results": [
+    {
+      "task_id": "255",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1268,
+      "output_tokens": 278,
+      "error": null,
+      "models": [
+        "gemma4:31b"
+      ]
+    },
+    {
+      "task_id": "464",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1194,
+      "output_tokens": 207,
+      "error": null,
+      "models": [
+        "gemma4:31b"
+      ]
+    },
+    {
+      "task_id": "262",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1194,
+      "output_tokens": 184,
+      "error": null,
+      "models": [
+        "gemma4:31b"
+      ]
+    },
+    {
+      "task_id": "394",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1144,
+      "output_tokens": 149,
+      "error": null,
+      "models": [
+        "gemma4:31b"
+      ]
+    },
+    {
+      "task_id": "245",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1180,
+      "output_tokens": 445,
+      "error": null,
+      "models": [
+        "gemma4:31b"
+      ]
+    },
+    {
+      "task_id": "465",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1165,
+      "output_tokens": 178,
+      "error": null,
+      "models": [
+        "gemma4:31b"
+      ]
+    },
+    {
+      "task_id": "404",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1121,
+      "output_tokens": 109,
+      "error": null,
+      "models": [
+        "gemma4:31b"
+      ]
+    },
+    {
+      "task_id": "115",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1127,
+      "output_tokens": 127,
+      "error": null,
+      "models": [
+        "gemma4:31b"
+      ]
+    },
+    {
+      "task_id": "430",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 3,
+      "input_tokens": 5524,
+      "output_tokens": 1500,
+      "error": "MAX_OUTPUT_TOKENS",
+      "models": [
+        "gemma4:31b"
+      ]
+    },
+    {
+      "task_id": "434",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1133,
+      "output_tokens": 135,
+      "error": null,
+      "models": [
+        "gemma4:31b"
+      ]
+    }
+  ]
+}

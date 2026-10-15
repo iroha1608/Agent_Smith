@@ -1,0 +1,140 @@
+{
+  "timestamp": "2026-10-15_18-27-48",
+  "providers_file": "tools/smoke/candidates/ollama_nemotron-3-super.json",
+  "count": 5,
+  "seed": 1,
+  "workers": 1,
+  "passed": 9,
+  "results": [
+    {
+      "task_id": "255",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1200,
+      "output_tokens": 337,
+      "error": null,
+      "models": [
+        "nemotron-3-super"
+      ]
+    },
+    {
+      "task_id": "464",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1127,
+      "output_tokens": 320,
+      "error": null,
+      "models": [
+        "nemotron-3-super"
+      ]
+    },
+    {
+      "task_id": "262",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1124,
+      "output_tokens": 284,
+      "error": null,
+      "models": [
+        "nemotron-3-super"
+      ]
+    },
+    {
+      "task_id": "394",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1077,
+      "output_tokens": 183,
+      "error": null,
+      "models": [
+        "nemotron-3-super"
+      ]
+    },
+    {
+      "task_id": "245",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 3,
+      "input_tokens": 4679,
+      "output_tokens": 1500,
+      "error": "MAX_OUTPUT_TOKENS",
+      "models": [
+        "nemotron-3-super"
+      ]
+    },
+    {
+      "task_id": "465",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 3,
+      "input_tokens": 3848,
+      "output_tokens": 333,
+      "error": null,
+      "models": [
+        "nemotron-3-super"
+      ]
+    },
+    {
+      "task_id": "404",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1054,
+      "output_tokens": 101,
+      "error": null,
+      "models": [
+        "nemotron-3-super"
+      ]
+    },
+    {
+      "task_id": "115",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 2,
+      "input_tokens": 2553,
+      "output_tokens": 783,
+      "error": null,
+      "models": [
+        "nemotron-3-super"
+      ]
+    },
+    {
+      "task_id": "430",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 3,
+      "input_tokens": 5021,
+      "output_tokens": 1500,
+      "error": "MAX_OUTPUT_TOKENS",
+      "models": [
+        "nemotron-3-super"
+      ]
+    },
+    {
+      "task_id": "434",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1061,
+      "output_tokens": 110,
+      "error": null,
+      "models": [
+        "nemotron-3-super"
+      ]
+    }
+  ]
+}

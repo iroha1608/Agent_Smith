@@ -1,0 +1,140 @@
+{
+  "timestamp": "2026-10-15_18-44-59",
+  "providers_file": "tools/smoke/candidates/mistral_codestral.json",
+  "count": 5,
+  "seed": 1,
+  "workers": 1,
+  "passed": 7,
+  "results": [
+    {
+      "task_id": "255",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 4,
+      "input_tokens": 5291,
+      "output_tokens": 774,
+      "error": "MAX_INPUT_TOKENS",
+      "models": [
+        "codestral-latest"
+      ]
+    },
+    {
+      "task_id": "464",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1116,
+      "output_tokens": 174,
+      "error": null,
+      "models": [
+        "codestral-latest"
+      ]
+    },
+    {
+      "task_id": "262",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1113,
+      "output_tokens": 163,
+      "error": null,
+      "models": [
+        "codestral-latest"
+      ]
+    },
+    {
+      "task_id": "394",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1066,
+      "output_tokens": 121,
+      "error": null,
+      "models": [
+        "codestral-latest"
+      ]
+    },
+    {
+      "task_id": "245",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1100,
+      "output_tokens": 409,
+      "error": null,
+      "models": [
+        "codestral-latest"
+      ]
+    },
+    {
+      "task_id": "465",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1084,
+      "output_tokens": 144,
+      "error": null,
+      "models": [
+        "codestral-latest"
+      ]
+    },
+    {
+      "task_id": "404",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1043,
+      "output_tokens": 92,
+      "error": null,
+      "models": [
+        "codestral-latest"
+      ]
+    },
+    {
+      "task_id": "115",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1052,
+      "output_tokens": 118,
+      "error": null,
+      "models": [
+        "codestral-latest"
+      ]
+    },
+    {
+      "task_id": "430",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 5,
+      "input_tokens": 5422,
+      "output_tokens": 618,
+      "error": "MAX_INPUT_TOKENS",
+      "models": [
+        "codestral-latest"
+      ]
+    },
+    {
+      "task_id": "434",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 5,
+      "input_tokens": 5226,
+      "output_tokens": 488,
+      "error": "MAX_INPUT_TOKENS",
+      "models": [
+        "codestral-latest"
+      ]
+    }
+  ]
+}

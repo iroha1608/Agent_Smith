@@ -212,8 +212,38 @@ again in a `finally` as a safety net.
 
 ## Benchmark results and analysis
 
-The full report — setup, per-task results, provider reliability, intermediary metrics, ablation and
-conclusions — is in [`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md); the backing `solution.json` files
+We compared 6 models from 3 providers on the subject's three recommended SWE-bench tasks: one model per
+run, no fallback, the exam's limits.
+
+| Model (provider) | sympy-14711 | sympy-13480 | xarray-4629 | Avg time per request | Failed requests |
+|---|---|---|---|---|---|
+| command-a-03-2025 (Cohere) | ✅ 15 it. | ✅ 5 it. | ✅ 5 it. | 2.2 s | 0 / 25 |
+| nemotron-3-super-120b (NVIDIA) | ✅ 14 it. | ✅ 14 it. | ✅ 11 it. | 4.8 s | 0 / 39 |
+| nemotron-3-ultra-550b (NVIDIA) | ❌ | ✅ | ✅ | 4.8 s | 0 / 53 |
+| gpt-oss-20b (NVIDIA) | ❌ | ✅ | ✅ | 1.2 s | 0 / 50 |
+| gemini-3.5-flash-lite (Google), re-run with `minimal` reasoning | ❌ | ✅ | ✅ | 1.7 s | 0 / 16 |
+| gemma-4-31b-it (Google) | ❌ | ❌ | ❌ | ~30 s | 30 / 57 |
+
+The production SWE-bench chain is:
+
+1. command-a
+2. nemotron-3-super
+3. Ollama Cloud: the same nemotron model, then `gemma4:31b` (both 3/3 in a later run)
+4. Mistral and Gemini
+
+We reproduced the exam through the moulinette's own `quickstart.sh` on all six tasks of its exam pool,
+and **6/6 passed** within the limits.
+
+The logs also showed where iterations were lost:
+
+- a search tool that ignored paths;
+- error messages that hid the broken line;
+- nested quotes in reproduction scripts.
+
+We fixed each of them and measured the fixes in ablations.
+
+The full report — setup, per-task results, provider reliability, intermediary metrics, ablations and
+conclusions — is in [`BENCHMARK_REPORT.md`](BENCHMARK_REPORT.md). The backing `solution.json` files
 are under [`benchmark/`](benchmark/).
 
 ## Resources

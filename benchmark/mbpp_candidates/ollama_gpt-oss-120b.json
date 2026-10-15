@@ -1,0 +1,140 @@
+{
+  "timestamp": "2026-10-15_18-44-57",
+  "providers_file": "tools/smoke/candidates/ollama_gpt-oss-120b.json",
+  "count": 5,
+  "seed": 1,
+  "workers": 1,
+  "passed": 8,
+  "results": [
+    {
+      "task_id": "255",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 2,
+      "input_tokens": 2554,
+      "output_tokens": 358,
+      "error": null,
+      "models": [
+        "gpt-oss:120b"
+      ]
+    },
+    {
+      "task_id": "464",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1150,
+      "output_tokens": 224,
+      "error": null,
+      "models": [
+        "gpt-oss:120b"
+      ]
+    },
+    {
+      "task_id": "262",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 2,
+      "input_tokens": 2568,
+      "output_tokens": 390,
+      "error": null,
+      "models": [
+        "gpt-oss:120b"
+      ]
+    },
+    {
+      "task_id": "394",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 3,
+      "input_tokens": 3719,
+      "output_tokens": 377,
+      "error": null,
+      "models": [
+        "gpt-oss:120b"
+      ]
+    },
+    {
+      "task_id": "245",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 2,
+      "input_tokens": 2648,
+      "output_tokens": 939,
+      "error": null,
+      "models": [
+        "gpt-oss:120b"
+      ]
+    },
+    {
+      "task_id": "465",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 2,
+      "input_tokens": 2333,
+      "output_tokens": 156,
+      "error": null,
+      "models": [
+        "gpt-oss:120b"
+      ]
+    },
+    {
+      "task_id": "404",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 1,
+      "input_tokens": 1088,
+      "output_tokens": 116,
+      "error": null,
+      "models": [
+        "gpt-oss:120b"
+      ]
+    },
+    {
+      "task_id": "115",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 2,
+      "input_tokens": 2413,
+      "output_tokens": 494,
+      "error": null,
+      "models": [
+        "gpt-oss:120b"
+      ]
+    },
+    {
+      "task_id": "430",
+      "crashed": false,
+      "passed": false,
+      "detail": "wrong answer",
+      "iterations": 3,
+      "input_tokens": 4613,
+      "output_tokens": 1500,
+      "error": "MAX_OUTPUT_TOKENS",
+      "models": [
+        "gpt-oss:120b"
+      ]
+    },
+    {
+      "task_id": "434",
+      "crashed": false,
+      "passed": true,
+      "detail": "PASSED",
+      "iterations": 2,
+      "input_tokens": 2389,
+      "output_tokens": 408,
+      "error": null,
+      "models": [
+        "gpt-oss:120b"
+      ]
+    }
+  ]
+}
