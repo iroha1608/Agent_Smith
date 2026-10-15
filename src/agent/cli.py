@@ -207,7 +207,7 @@ def run_swebench_agent(
     output_file_path: str,
     model_name: str | None = None,
     provider_url: str | None = None,
-    providers_file_path: str = "providers/providers.json",
+    providers_file_path: str = "providers/providers_swebench.json",
     mcp_stdio: str | None = None,
     mcp_server: str | None = None,
 ) -> None:

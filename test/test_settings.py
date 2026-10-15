@@ -3,8 +3,9 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from src.config.settings import Settings, load_settings
+from src.config.settings import load_settings
 # load_providers/select_provider のテストは 07 の §4 のまま(同居なら同一import)
 from src.config.settings import load_providers, order_providers, select_provider
 
@@ -49,7 +50,7 @@ def test_settings_rejects_unknown_key(monkeypatch: pytest.MonkeyPatch, tmp_path:
         json.dumps({"limits": {"max_iteration": 3}}), encoding="utf-8"  # sが無い
     )
     monkeypatch.chdir(tmp_path)
-    with pytest.raises(Exception):  # pydantic.ValidationError
+    with pytest.raises(ValidationError):
         load_settings()
 
 
@@ -78,6 +79,7 @@ def test_select_provider_cli_overrides_primary(tmp_path: Path) -> None:
     assert primary.models == ["x/y"]          # model -> models
     assert primary.provider_url == "https://eval.test/v1"
     assert primary.keys_env == "OPENROUTER_API_KEY"
+
 
 def test_shipped_config_files_parse(monkeypatch: pytest.MonkeyPatch) -> None:
     """リポジトリ直下の実 config.json / providers.json がそのままロードできる(出荷物の回帰)."""
@@ -122,3 +124,12 @@ def test_order_providers_without_cli_keeps_priority(tmp_path: Path) -> None:
     """指定が無ければpriority順のまま."""
     providers = load_providers(_write(tmp_path / "providers.json", _PROVIDERS))
     assert [p.name for p in order_providers(providers)] == ["openrouter", "groq"]
+
+
+def test_shipped_swebench_providers_parse() -> None:
+    """SWE-bench用の providers_swebench.json も読み込め、1分あたりの枠が小さい groq を含まない."""
+    repo_root = Path(__file__).resolve().parents[1]
+    providers = load_providers(str(repo_root / "providers" / "providers_swebench.json"))
+    names = [provider.name for provider in providers]
+    assert names[0] == "cohere"
+    assert "groq" not in names
