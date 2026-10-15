@@ -9,6 +9,8 @@ MCPサーバー(mcp_tools_swebench.py)はここの SweWorkspace のメソッド�
 - ファイルの読み書きは、コンテナ内のPythonで補助スクリプトを実行して行う。データは
   標準入力のJSONで渡し、シェルの引用符の問題を避ける。補助スクリプトは古いPython
   (SWE-benchの環境には3.5〜3.6もある)でも動くよう、f-stringを使わずに書く。
+  また ASCII だけで書く(コメントも含む)。`python -c` の引数に非ASCII文字があると、C ロケールの
+  Python 3.6 は起動時に "Unable to decode the command" で落ちる(実測: django-11066)。
 """
 import json
 import os
@@ -98,6 +100,10 @@ if note:
     print(note)
 '''
 
+# 構文エラーのときは error.text だけでなく、編集後の該当範囲を行番号付きで見せる。エラー位置が空行や
+# 後続行だと error.text では何が壊れたか見えない(実測: 引用符のエスケープが消えた行を見せられず、
+# command-a が sympy-14711 で同じ書き方の編集を7回繰り返した)。old_str が見つからないときは、
+# インデントだけが違う候補行を示す(実測: nemotron-3-super が sympy-13480 で空白1つの差で2回失敗)。
 _EDIT_SCRIPT = r'''
 import io, json, os, sys
 a = json.loads(sys.stdin.read())
@@ -112,6 +118,14 @@ count = content.count(old)
 if count == 0:
     print("Error: old_str was not found in {}. It must match the file exactly, including indentation and "
           "whitespace. Copy it from read_file output without the 'N: ' line-number prefixes.".format(path))
+    first = next((line for line in old.splitlines() if line.strip()), "")
+    file_lines = content.splitlines()
+    hits = [n for n, line in enumerate(file_lines, 1) if first and line.strip() == first.strip()][:3]
+    for n in hits:
+        indent = len(file_lines[n - 1]) - len(file_lines[n - 1].lstrip())
+        print("The first line of old_str is at line {} with {} leading whitespace characters (yours has {}):"
+              .format(n, indent, len(first) - len(first.lstrip())))
+        print("{}: {}".format(n, file_lines[n - 1]))
     sys.exit(1)
 if count > 1:
     print("Error: old_str was found {} times in {}. Include more surrounding lines so it matches exactly "
@@ -124,9 +138,12 @@ if path.endswith(".py"):
         compile(updated, path, "exec")
     except SyntaxError as error:
         print("SYNTAX ERROR: this edit would make {} invalid Python: {} (line {}). The edit was reverted; "
-              "the file is unchanged.".format(path, error.msg, error.lineno))
-        if error.text:
-            print("    " + error.text.rstrip())
+              "the file is unchanged. With your edit the file would read (>> marks the error line):"
+              .format(path, error.msg, error.lineno))
+        new_lines = updated.splitlines()
+        bad = min(max(error.lineno or start_line, 1), max(len(new_lines), 1))
+        for n in range(max(1, start_line - 1, bad - 8), min(len(new_lines), bad + 1) + 1):
+            print("{}{}: {}".format(">> " if n == bad else "   ", n, new_lines[n - 1]))
         sys.exit(1)
 with io.open(path, "w", encoding="utf-8", newline="") as f:
     f.write(updated)
@@ -330,7 +347,9 @@ class SweWorkspace:
         if result.timed_out:
             return "Error: the operation timed out."
         text = result.stdout.rstrip("\n")
-        if result.exit_code not in (0, 1) and not text:
+        # 想定内の失敗はスクリプト自身が説明を出してから終了コード1で終わる。何も出さずに失敗したら
+        # (例外・起動失敗)標準エラーを返す。黙って空文字を返すと、LLMは何が起きたか分からない
+        if result.exit_code != 0 and not text:
             return f"Error: {result.stderr.strip()[-500:] or f'exit code {result.exit_code}'}"
         return text
 

@@ -59,6 +59,33 @@ def test_edit_file_replaces_once_and_reverts_syntax_errors(repo: Path) -> None:
     assert "found 2 times" in ws.edit_file("calc/ops.py", "divide", "div")
 
 
+def test_edit_file_explains_why_an_edit_failed(repo: Path) -> None:
+    """構文エラーは編集後の行を、見つからない old_str はインデントだけ違う候補行を示す."""
+    ws = _workspace(repo)
+    # 実測(command-a, sympy-14711): \"\"\" の中で \' と書き、エスケープが消えた行で構文エラーを7回繰り返した
+    broken = ws.edit_file("calc/ops.py", "    return a * b", "    raise TypeError('bad: '{}' value'.format(a))")
+    assert broken.startswith("SYNTAX ERROR") and "would read" in broken
+    assert ">> 2:     raise TypeError('bad: '{}' value'.format(a))" in broken
+    # 実測(nemotron-3-super, sympy-13480): 空白が1つ多い old_str で2回失敗した
+    missing = ws.edit_file("calc/ops.py", "     return a * b", "     return a / b")
+    assert missing.startswith("Error: old_str was not found")
+    assert "at line 2 with 4 leading whitespace characters (yours has 5)" in missing
+    assert missing.endswith("2:     return a * b")
+
+
+def test_helper_scripts_are_ascii_only() -> None:
+    """コンテナで python -c に渡す補助スクリプトは ASCII だけで書く.
+
+    C ロケールの Python 3.6(django-11066 など)は、引数に非ASCII文字があると起動時に落ちる。
+    """
+    from src.mcp_core.swe_bench import workspace
+    scripts = {name: value for name, value in vars(workspace).items()
+               if name.endswith("_SCRIPT") and isinstance(value, str)}
+    assert scripts
+    for name, script in scripts.items():
+        assert script.isascii(), name
+
+
 def test_list_files_returns_absolute_paths(repo: Path) -> None:
     listing = _workspace(repo).list_files(".", "*.py").splitlines()
     assert listing == [f"{repo}/calc/ops.py", f"{repo}/tests/test_ops.py"]
