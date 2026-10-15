@@ -33,7 +33,8 @@ _SNIPPETS = [
     "print(edit_file(filepath='sympy/physics/vector/vector.py', old_str='        other = _check_vector(other)\\n"
     "        return Vector(self.args + other.args)', new_str='        if other == 0:\\n            return self\\n"
     "        other = _check_vector(other)\\n        return Vector(self.args + other.args)'))",
-    "print(edit_file(filepath='sympy/physics/vector/vector.py', old_str='        if other == 0:', new_str='        if other == 0'))",
+    "print(edit_file(filepath='sympy/physics/vector/vector.py', "
+    "old_str='        if other == 0:', new_str='        if other == 0'))",
     "patch = get_patch(); print(patch)",
     "report = run_tests(); print(report[-1500:])",
     "print(run_command(command='git status --short'))",
