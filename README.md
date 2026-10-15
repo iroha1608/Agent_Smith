@@ -50,8 +50,9 @@ cd ../moulinette && uv run moulinette_eval validate mbpp ../cache/mbpp_task.json
 uv run python -m agent_swebench --task-file ../cache/swebench_task.json --output ../cache/swebench_solution.json
 ```
 - `--model-name` / `--provider-url` are optional. If the URL (or the model) belongs to a provider of
-  `providers/providers.json`, that provider's keys and settings are used and the other providers stay
-  as fallbacks; an unknown URL uses the key `<DOMAIN>_API_KEY` (e.g. `TOGETHER_API_KEY`).
+  the providers file, that provider's keys and settings are used and the other providers stay as
+  fallbacks; an unknown URL uses the key `<DOMAIN>_API_KEY` (e.g. `TOGETHER_API_KEY`).
+  `--providers_file_path` selects another providers file.
 - `--mcp-stdio "<command>"` / `--mcp-server <url>` (optional, mutually exclusive) connect the agent to
   another MCP server. By default each run starts its own server (`mcp_tools_mbpp.py` /
   `mcp_tools_swebench.py`) as a private child process over stdio.
@@ -73,7 +74,8 @@ uv run sandbox -c "print(1 + 1)"                                   # run one sni
 | File | What it configures |
 |---|---|
 | `config.json` | hard limits per benchmark (`limits` = MBPP, `swebench_limits`), retry / backoff, the per-snippet execution timeout of the agent's sandbox |
-| `providers/providers.json` | providers in fallback order: base URL, models, the env-var name of the keys, per-model request parameters (e.g. turning "thinking" off) |
+| `providers/providers.json` | MBPP: providers in fallback order — base URL, models, the env-var name of the keys, per-model request parameters (e.g. turning "thinking" off) |
+| `providers/providers_swebench.json` | SWE-bench: the same format, ordered by our SWE-bench benchmark (providers whose per-minute token quota is smaller than one SWE-bench request are left out) |
 | `sandbox_template.json` | `SandboxConfig`: authorized imports (`x.*` allows submodules), allowed directories, time and memory limits |
 | `.env` | API keys (not committed) |
 
