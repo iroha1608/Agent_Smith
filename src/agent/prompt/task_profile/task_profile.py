@@ -39,6 +39,8 @@ class TaskProfile(ABC):
         rotate_after_misses (int | None): 提出に至らない反復がこの回数続いたら別プロバイダの
             モデルへ切り替える。Noneなら切り替えない(探索が本分で、提出しない反復が続くのが
             正常なタスク向け)。
+        rotate_after_repeats (int | None): 以前と同一のコードの実行([REPEATED])がこの回数続いたら
+            別プロバイダのモデルへ切り替える。Noneなら切り替えない。
         iteration_warn_at (int): 残りの反復回数がこの値以下になったら提出を促す注記を付ける。
     """
 
@@ -47,6 +49,7 @@ class TaskProfile(ABC):
     latest_observation_max_chars: int = 1500
     assistant_max_chars: int = 1200
     rotate_after_misses: int | None = 2
+    rotate_after_repeats: int | None = None
     iteration_warn_at: int = 1
 
     def submit_hint(self) -> str:

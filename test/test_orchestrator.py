@@ -400,6 +400,29 @@ def test_repeated_code_is_flagged_and_provider_rotates() -> None:
     assert provider.rotations == 1
 
 
+def test_swebench_rotates_after_repeating_the_same_code() -> None:
+    """SWE-bench では [REPEATED] の指摘のあとも同じコードを出し直したら、別プロバイダのモデルへ切り替える.
+
+    探索で提出しない反復が続くのは正常なので、提出の有無では切り替えない(実測: codestral が
+    sympy-14711 で同じ edit_file を22反復出し続けた)。
+    """
+    from src.agent.prompt.task_profile.swebench_profile import SWEBenchProfile
+    patch = "diff --git a/x.py b/x.py\\n--- a/x.py\\n+++ b/x.py\\n@@ -1 +1 @@\\n-a\\n+b\\n"
+    submit = f'Thought: submit.\n```python\nfinal_answer("{patch}")\n```'
+    explore = "Thought: look.\n```python\nprint('reading')\n```"
+    other = "Thought: look elsewhere.\n```python\nprint('elsewhere')\n```"
+    provider = _RotatingStub([explore, other, explore, explore, submit])
+    orchestrator = Orchestrator(
+        provider=provider, extractor=PythonCodeExtractor(), sandbox=MockSandbox(),
+        profile=SWEBenchProfile(), limits=_limits(),
+    )
+    solution = orchestrator.run("1", "swebench", "task")
+    assert solution.success is True
+    # 新しいコード2つは数えず、繰り返しが2回続いた4反復目で1回だけ切り替える
+    assert provider.rotations == 1
+    assert solution.steps[3].sandbox_output.startswith("[REPEATED]")
+
+
 def test_input_guard_shrinks_window_before_giving_up() -> None:
     """累積入力の残りが少ないときは、履歴の窓を縮めて送り、上限を踏み越えない."""
     sent_sizes: list[int] = []

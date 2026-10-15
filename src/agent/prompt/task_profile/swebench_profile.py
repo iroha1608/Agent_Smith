@@ -79,6 +79,9 @@ class SWEBenchProfile(TaskProfile):
     latest_observation_max_chars = 8000
     assistant_max_chars = 2000
     rotate_after_misses = None
+    # [REPEATED] の指摘のあとも同じコードを出し直したら、別プロバイダのモデルに替える。実測(codestral,
+    # sympy-14711): 失敗する同じ edit_file を22反復出し続け、空のパッチのまま上限に達した
+    rotate_after_repeats = 2
     # 残り4反復で促す(テストの実行・パッチの確認・提出に数反復かかるため)
     iteration_warn_at = 4
 

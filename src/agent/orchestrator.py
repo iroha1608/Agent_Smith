@@ -99,6 +99,8 @@ class Orchestrator:
         executed_codes: dict[str, int] = {}
         # 提出に至らなかった反復の連続数。停滞したら別プロバイダのモデルへ切り替える。
         misses_in_a_row = 0
+        # 以前と同一のコードを実行した反復の連続数。指摘しても繰り返すなら別プロバイダのモデルへ替える。
+        repeats_in_a_row = 0
 
         # ループ本体
         while True:
@@ -205,8 +207,10 @@ class Orchestrator:
             fingerprint = " ".join(code.split())
             if fingerprint in executed_codes:
                 observation = f"{repeated_code_note(executed_codes[fingerprint])}\n{observation}"
+                repeats_in_a_row = self._count_repeat(repeats_in_a_row)
             else:
                 executed_codes[fingerprint] = len(steps) + 1
+                repeats_in_a_row = 0
             # 閉じフェンスが欠けたブロックを救済実行した場合は、その事実をLLMに明示する
             salvaged = salvage_kind(cleaned_code)
             if salvaged is not None:
@@ -282,6 +286,25 @@ class Orchestrator:
             self._rotate_provider()
             return 0
         return misses_in_a_row
+
+    def _count_repeat(self, repeats_in_a_row: int) -> int:
+        """同一コードの再実行の連続数を更新し、閾値に達したらモデルを切り替える.
+
+        閾値はプロファイルが決める(SWE-benchは2回。MBPPは提出に至らない反復の連続で切り替えるので使わない)。
+        [REPEATED] の指摘を読んでも同じコードを出すモデルは、同じ履歴からは抜け出せないことが多い。
+
+        Args:
+            repeats_in_a_row (int): これまでの連続数。
+
+        Returns:
+            int: 更新後の連続数(切り替えたら0に戻す)。
+        """
+        repeats_in_a_row += 1
+        threshold = self.profile.rotate_after_repeats
+        if threshold is not None and repeats_in_a_row >= threshold:
+            self._rotate_provider()
+            return 0
+        return repeats_in_a_row
 
     def _rotate_provider(self) -> None:
         """LLMクライアントが切り替えに対応していれば、別プロバイダのモデルを優先させる.
