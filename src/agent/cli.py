@@ -167,7 +167,9 @@ def run_mbpp_agent(
     output_file_path: str,
     model_name: str | None = None,
     provider_url: str | None = None,
-    providers_file_path: str = "providers/providers.json"
+    providers_file_path: str = "providers/providers.json",
+    mcp_stdio: str | None = None,
+    mcp_server: str | None = None,
 ) -> None:
     """MBPPタスクを1問解くエージェントを実行し、SolutionOutputを必ず書き出す.
 
@@ -177,9 +179,18 @@ def run_mbpp_agent(
         model_name (str | None): 使用するLLMモデル名。Noneなら設定ファイルのデフォルトを使用
         provider_url (str | None): 使用するLLMプロバイダのURL。Noneなら設定ファイルのデフォルトを使用
         providers_file_path (str): プロバイダ設定ファイルのパス
+        mcp_stdio (str | None): 自前サーバーの代わりに stdio で起動するMCPサーバーのコマンド。
+        mcp_server (str | None): 自前サーバーの代わりに接続する streamable HTTP のMCPサーバーURL。
+            どちらも無ければ自前のサーバーを stdio で起動する(採点時はこの既定で動く)。
     """
     # 採点側の制限時間はプロセス起動から数えるので、できるだけ早く起点を取る
     started_at = time.monotonic()
+
+    def solve(task: MBPPTaskInput) -> SolutionOutput:
+        """読み込んだタスクを解く(MCPの指定の検証もここで行い、誤りは失敗として記録する)."""
+        endpoint = McpEndpoint(mcp_stdio, mcp_server)
+        return _solve_mbpp(task, started_at, model_name, provider_url, providers_file_path, endpoint)
+
     _run_safely(
         benchmark="mbpp",
         started_at=started_at,
@@ -187,7 +198,7 @@ def run_mbpp_agent(
         output_file_path=output_file_path,
         task_model=MBPPTaskInput,
         task_id_of=lambda task: str(task.task_id),
-        solve=lambda task: _solve_mbpp(task, started_at, model_name, provider_url, providers_file_path),
+        solve=solve,
     )
 
 
@@ -196,7 +207,9 @@ def run_swebench_agent(
     output_file_path: str,
     model_name: str | None = None,
     provider_url: str | None = None,
-    providers_file_path: str = "providers/providers.json"
+    providers_file_path: str = "providers/providers.json",
+    mcp_stdio: str | None = None,
+    mcp_server: str | None = None,
 ) -> None:
     """SWE-benchタスクを1問解くエージェントを実行し、SolutionOutputを必ず書き出す.
 
@@ -206,8 +219,17 @@ def run_swebench_agent(
         model_name (str | None): 使用するLLMモデル名。Noneなら設定ファイルのデフォルトを使用
         provider_url (str | None): 使用するLLMプロバイダのURL。Noneなら設定ファイルのデフォルトを使用
         providers_file_path (str): プロバイダ設定ファイルのパス
+        mcp_stdio (str | None): 自前サーバーの代わりに stdio で起動するMCPサーバーのコマンド。
+        mcp_server (str | None): 自前サーバーの代わりに接続する streamable HTTP のMCPサーバーURL。
+            どちらも無ければ自前のサーバーを stdio で起動する(採点時はこの既定で動く)。
     """
     started_at = time.monotonic()
+
+    def solve(task: SWEBenchTaskInput) -> SolutionOutput:
+        """読み込んだタスクを解く(MCPの指定の検証もここで行い、誤りは失敗として記録する)."""
+        endpoint = McpEndpoint(mcp_stdio, mcp_server)
+        return _solve_swebench(task, started_at, model_name, provider_url, providers_file_path, endpoint)
+
     _run_safely(
         benchmark="swebench",
         started_at=started_at,
@@ -215,7 +237,7 @@ def run_swebench_agent(
         output_file_path=output_file_path,
         task_model=SWEBenchTaskInput,
         task_id_of=lambda task: task.instance_id,
-        solve=lambda task: _solve_swebench(task, started_at, model_name, provider_url, providers_file_path),
+        solve=solve,
     )
 
 
@@ -354,6 +376,62 @@ def _sandbox_config(settings: Settings) -> SandboxConfig:
     })
 
 
+class McpEndpoint:
+    """エージェントが接続するMCPサーバーの指定(CLIの --mcp-stdio / --mcp-server).
+
+    課題 V.2 のサンドボックスCLIと同じく、どちらのフラグを渡したかで接続方式が決まる。
+    何も指定しなければ、ベンチマークに対応する自前のサーバーを stdio の子プロセスとして起動する
+    (タスクごとに専用のサーバーになり、終了時に一緒に片付く。ポートも使わない)。
+
+    Attributes:
+        stdio (str | None): stdio で起動するサーバーのコマンド。
+        server (str | None): 接続する streamable HTTP サーバーのURL。
+    """
+
+    def __init__(self, stdio: str | None = None, server: str | None = None) -> None:
+        """指定を検証して保持する.
+
+        Args:
+            stdio (str | None): stdio で起動するサーバーのコマンド。
+            server (str | None): 接続する streamable HTTP サーバーのURL。
+
+        Raises:
+            ValueError: 両方を同時に指定した場合。
+        """
+        if stdio and server:
+            raise ValueError("--mcp-stdio and --mcp-server are mutually exclusive")
+        self.stdio = stdio or None
+        self.server = server or None
+
+    def resolve(self, default_script: str) -> tuple[str | None, str | None]:
+        """Sandbox に渡す接続先 (mcp_stdio, mcp_server) を返す.
+
+        Args:
+            default_script (str): 指定が無いときに stdio で起動する自前サーバーのスクリプト名。
+
+        Returns:
+            tuple[str | None, str | None]: (stdioで起動するコマンド, 接続するHTTPのURL)。どちらか一方だけが入る。
+        """
+        if self.server:
+            return None, self.server
+        return self.stdio or _mcp_command(default_script), None
+
+
+def _warn_missing_tools(sandbox: Sandbox, required: tuple[str, ...]) -> None:
+    """プロンプトの手本が前提にしているツールが、接続中のサーバーに無ければ警告する.
+
+    自前以外のサーバーを繋いだときに、LLMが存在しないツールを呼び続けるのを早く気付けるようにする。
+
+    Args:
+        sandbox (Sandbox): 接続済みのサンドボックス。
+        required (tuple[str, ...]): 手本が使うツール名。
+    """
+    missing = [name for name in required if name not in sandbox.tools]
+    if missing:
+        _LOGGER.warning("the connected MCP server does not provide %s; the prompt examples use them",
+                        ", ".join(missing))
+
+
 def _mcp_command(script_name: str) -> str:
     """MCPサーバーを起動するコマンドを返す.
 
@@ -375,6 +453,7 @@ def _solve_mbpp(
     model_name: str | None,
     provider_url: str | None,
     providers_file_path: str,
+    endpoint: McpEndpoint,
 ) -> SolutionOutput:
     """設定・プロバイダ・サンドボックスを組み立て、MBPPの1問を解いてSolutionOutputを返す.
 
@@ -384,6 +463,7 @@ def _solve_mbpp(
         model_name (str | None): CLIで指定されたモデル名。
         provider_url (str | None): CLIで指定されたプロバイダURL。
         providers_file_path (str): プロバイダ設定ファイルのパス。
+        endpoint (McpEndpoint): 接続するMCPサーバーの指定。
 
     Returns:
         SolutionOutput: エージェントの実行結果。
@@ -393,7 +473,9 @@ def _solve_mbpp(
     load_dotenv()
     client = _build_client(settings, settings.limits, started_at, model_name, provider_url, providers_file_path)
 
-    with Sandbox(config=_sandbox_config(settings), mcp_stdio=_mcp_command("mcp_tools_mbpp.py")) as sandbox:
+    mcp_stdio, mcp_server = endpoint.resolve("mcp_tools_mbpp.py")
+    with Sandbox(config=_sandbox_config(settings), mcp_stdio=mcp_stdio, mcp_server=mcp_server) as sandbox:
+        _warn_missing_tools(sandbox, ("run_tests",))
         orchestrator = Orchestrator(
             provider=client,
             extractor=CompositeCodeExtractor(),
@@ -412,6 +494,7 @@ def _solve_swebench(
     model_name: str | None,
     provider_url: str | None,
     providers_file_path: str,
+    endpoint: McpEndpoint,
 ) -> SolutionOutput:
     """Docker環境とMCPサーバーを用意し、SWE-benchの1問を解いてSolutionOutputを返す.
 
@@ -425,6 +508,8 @@ def _solve_swebench(
         model_name (str | None): CLIで指定されたモデル名。
         provider_url (str | None): CLIで指定されたプロバイダURL。
         providers_file_path (str): プロバイダ設定ファイルのパス。
+        endpoint (McpEndpoint): 接続するMCPサーバーの指定。HTTPの既存サーバーに繋ぐ場合、
+            下の環境変数はそのサーバーに届かないので、サーバー側を同じ設定で起動しておく必要がある。
 
     Returns:
         SolutionOutput: エージェントの実行結果。
@@ -452,7 +537,9 @@ def _solve_swebench(
             "SWE_EVAL_SCRIPT_FILE": eval_file.name,
             "SWE_DEADLINE_EPOCH": str(time.time() + (dead_line - time.monotonic())),
         })
-        with Sandbox(config=_sandbox_config(settings), mcp_stdio=_mcp_command("mcp_tools_swebench.py")) as sandbox:
+        mcp_stdio, mcp_server = endpoint.resolve("mcp_tools_swebench.py")
+        with Sandbox(config=_sandbox_config(settings), mcp_stdio=mcp_stdio, mcp_server=mcp_server) as sandbox:
+            _warn_missing_tools(sandbox, ("read_file", "edit_file", "run_tests", "get_patch"))
             orchestrator = Orchestrator(
                 provider=client,
                 extractor=CompositeCodeExtractor(),

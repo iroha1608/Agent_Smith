@@ -16,6 +16,8 @@ def agent_mbpp(
     model_name: str | None = None,
     provider_url: str | None = None,
     providers_file_path: str = "providers/providers.json",
+    mcp_stdio: str | None = None,
+    mcp_server: str | None = None,
     **extra_args: object
 ) -> None:
     """MBPP用のエントリーポイント関数.
@@ -25,6 +27,9 @@ def agent_mbpp(
         output (str): SolutionOutputを書き出すJSONファイルのパス
         model_name (str): 使用するLLMモデル名。Noneなら設定ファイルのデフォルトを使用
         provider_url (str): 使用するLLMプロバイダのURL。Noneなら設定ファイルのデフォルトを使用
+        providers_file_path (str): プロバイダ設定ファイルのパス
+        mcp_stdio (str | None): 自前サーバーの代わりに stdio で起動するMCPサーバーのコマンド
+        mcp_server (str | None): 自前サーバーの代わりに接続する streamable HTTP のMCPサーバーURL
         **extra_args: object: fireが解釈できなかった余分な引数。存在する場合はエラーを発生させる。
     """
     if extra_args:
@@ -34,7 +39,9 @@ def agent_mbpp(
         output_file_path=output,
         model_name=model_name,
         provider_url=provider_url,
-        providers_file_path=providers_file_path
+        providers_file_path=providers_file_path,
+        mcp_stdio=mcp_stdio,
+        mcp_server=mcp_server,
     )
 
 

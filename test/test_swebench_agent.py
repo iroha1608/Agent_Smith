@@ -151,3 +151,15 @@ def test_run_safely_handles_sigterm(tmp_path: Path) -> None:
     written = json.loads(output.read_text(encoding="utf-8"))
     assert written["error"] == "INTERRUPTED: _Terminated"
     assert signal.getsignal(signal.SIGTERM) is not None
+
+
+def test_mcp_endpoint_defaults_to_own_server_over_stdio() -> None:
+    """指定が無ければ自前サーバーを stdio で起動し、--mcp-server ならそのURLに繋ぐ。両方は不可."""
+    from src.agent.cli import McpEndpoint
+    stdio, server = McpEndpoint().resolve("mcp_tools_mbpp.py")
+    assert server is None
+    assert str(stdio).endswith("mcp_tools_mbpp.py")
+    assert McpEndpoint(stdio="python other.py").resolve("x.py") == ("python other.py", None)
+    assert McpEndpoint(server="http://127.0.0.1:9/mcp").resolve("x.py") == (None, "http://127.0.0.1:9/mcp")
+    with pytest.raises(ValueError):
+        McpEndpoint(stdio="a", server="b")
