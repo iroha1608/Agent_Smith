@@ -26,7 +26,8 @@ The tables were generated with `uv run python tools/benchmark_summary.py <direct
     the endpoint ended one run with HTTP 400.
   - Groq: 8,000 tokens per minute per account cannot carry one SWE-bench run within 900 s.
 - **Exam reproduction:** we ran all six tasks of the moulinette's exam pool through its own
-  `quickstart.sh`, with the production configuration. They passed 6/6 within the limits (§7).
+  `quickstart.sh`, with the production configuration, before and after the fixes. Both runs passed
+  6/6 within the limits, and the final code needed 34% fewer input and 76% fewer output tokens (§7).
 - **Ablations** (§5):
   - Summarizing the `run_tests()` output: no measurable difference on these tasks.
   - Fixing misleading tool feedback (for example, a search limited to a path always returned "No
@@ -60,7 +61,7 @@ this report is `Metrics: VALID`.
 | Ablation 1 | `73de8c7` | `run_tests()` output summary on / off |
 | Ablation 2 | `8e54ca5` → `0c080b4` | tool feedback fixes, before / after (2 runs each) |
 | Ablation 3 | `0c080b4` → `5e2f7cd` | prompt: how to write a reproduction script (2 runs each) |
-| Exam reproduction | `8e54ca5` | production configuration, all 6 exam-pool tasks |
+| Exam reproduction | `8e54ca5`, `1ac6023` | production configuration, all 6 exam-pool tasks, before and after the fixes |
 
 ### 1.2 Models and providers: 6 models from 3 providers
 
@@ -430,7 +431,7 @@ Two changes target specific failures, though, and the effect on those failures i
 
 **Final SWE-bench pipeline** (`providers/providers_swebench.json`, tried in this order):
 
-1. **Cohere `command-a-03-2025`.** 3/3 in v1 and 6/6 in the exam reproduction.
+1. **Cohere `command-a-03-2025`.** 3/3 in v1 and 6/6 in both exam reproductions.
    - It used the fewest iterations (4–15) and input tokens (11,000–55,000 per task) of all models.
    - It answered fastest (2.2 s per request) and never failed a request.
    - It submitted one iteration after the tests passed.
@@ -478,33 +479,47 @@ Two changes target specific failures, though, and the effect on those failures i
 - Run-to-run variance is large: the same model, code and task took 6–24 iterations. A single run per
   configuration (n = 1) cannot rank close alternatives, and we report it as such.
 
-## 7. Exam reproduction (production configuration, commit `8e54ca5`)
+## 7. Exam reproduction (production configuration)
 
 All six `EXAM_POOL` tasks were run through the moulinette's own `quickstart.sh`:
 dump → `run-agent` with its 900 s SIGTERM/SIGKILL → validate. No model was given, so the agent used its
-default `providers/providers_swebench.json`.
+default `providers/providers_swebench.json`. We did this twice:
 
-| Task | Result | Iterations | Input tokens | Output tokens | Time (s) | Model that answered |
-|---|---|---|---|---|---|---|
-| django__django-11066 | PASS | 4 | 12,653 | 391 | 23 | command-a-03-2025 (4/4 steps) |
-| pydata__xarray-4629 | PASS | 7 | 30,023 | 505 | 33 | command-a-03-2025 (7/7) |
-| scikit-learn__scikit-learn-13439 | PASS | 13 | 54,528 | 2,138 | 71 | command-a-03-2025 (13/13) |
-| sympy__sympy-13480 | PASS | 6 | 16,864 | 389 | 30 | command-a-03-2025 (6/6) |
-| sympy__sympy-14711 | PASS | 12 | 49,076 | **9,715** | 185 | command-a-03-2025 (12/12) |
-| sympy__sympy-18189 | PASS | 7 | 25,695 | 569 | 56 | command-a-03-2025 (7/7) |
+- before the fixes of §5.2–§5.3, at `8e54ca5`;
+- at the final agent code, `1ac6023`.
 
-6/6 passed (the exam needs 2/3) with 49 requests, 0 failed and 0 retries. The one warning is 14711's
-**9,715 of 10,000 output tokens**:
+The data is in `benchmark/swebench/exam_reproduction_{8e54ca5,1ac6023}`.
+
+| Task | `8e54ca5`: result, iterations, input, output | `1ac6023` (final): result, iterations, input, output |
+|---|---|---|
+| django__django-11066 | PASS, 4, 12,653, 391 | PASS, 5, 16,246, 376 |
+| pydata__xarray-4629 | PASS, 7, 30,023, 505 | PASS, 5, 16,299, 385 |
+| scikit-learn__scikit-learn-13439 | PASS, 13, 54,528, 2,138 | PASS, 6, 21,589, 723 |
+| sympy__sympy-13480 | PASS, 6, 16,864, 389 | PASS, 6, 18,305, 466 |
+| sympy__sympy-14711 | PASS, 12, 49,076, **9,715** | PASS, 9, 28,176, 915 |
+| sympy__sympy-18189 | PASS, 7, 25,695, 569 | PASS, 6, 23,568, 458 |
+| **Total** | **6/6**, 49 it., 188,839 in, 13,707 out | **6/6**, 37 it., 124,183 in, 3,323 out |
+
+- Both runs passed 6/6 (the exam needs 2/3), within every limit.
+- Every step was answered by command-a (Cohere): 49 and 37 requests, none failed, no retries.
+
+**The warning in the first run** was 14711's **9,715 of 10,000 output tokens**:
 
 - command-a wrote several long `edit_file` attempts per turn, and seven turns were cut off at the
   per-turn cap of 1,200 tokens.
-- Its edits put `\'` inside a `"""…"""` argument. Python consumed the escapes, so the edited file was
-  invalid, and `edit_file` reverted it.
+- Its edits put `\'` inside a `"""…"""` argument. Python consumed the escapes, so the edited file
+  was invalid, and `edit_file` reverted it.
 - The error message showed only a blank `error.text` line, so the model could not see what was wrong.
 
-That message is one of the fixes in §5.2. The output-token budget is enforced as well: the cap of each
-request is lowered to what remains, and a `[BUDGET]` note asks for a submission. Even in the worst case
-the run ends within the limit, and the patch collected at the end is still submitted.
+That message is one of the fixes in §5.2. With the final code, the same task took 915 output tokens.
+Over the six tasks, the final run used 25% fewer iterations, 34% fewer input tokens and 76% fewer
+output tokens. That is one run each, but it is consistent with the ablations.
+
+The output-token budget is enforced in any case:
+
+- the cap of each request is lowered to what remains;
+- a `[BUDGET]` note asks for a submission;
+- the patch collected at the end is still submitted.
 
 ## 8. Later candidates: Mistral (key renewed) and Ollama Cloud
 
