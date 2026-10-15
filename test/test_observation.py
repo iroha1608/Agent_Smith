@@ -66,3 +66,12 @@ def test_no_code_helper() -> None:
     obs = observation_no_code()
     assert obs.startswith("[NO_CODE]")
     assert "code block" in obs
+
+
+def test_value_of_last_expression_is_shown() -> None:
+    """print し忘れた最後の式(ツール呼び出し等)の値も Observation に載る."""
+    from src.agent.observation import build_observation
+    from src.models.output import ExecuteResult
+    observation = build_observation(ExecuteResult(stdout="", value="exit_code: 0\n--- stdout ---\nhello"))
+    assert "(no output)" in observation
+    assert "--- value of the last expression ---\nexit_code: 0" in observation

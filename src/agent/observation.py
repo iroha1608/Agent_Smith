@@ -67,7 +67,8 @@ def collect_statuses(result: ExecuteResult) -> list[Status]:
     return statuses
 
 
-def _render_observation(statuses: list[Status], stdout: str, detail: str, extra_note: str = "") -> str:
+def _render_observation(statuses: list[Status], stdout: str, detail: str, extra_note: str = "",
+                        value: str | None = None) -> str:
     """ラベル、stdout、詳細からObservation文字列を構築する.
 
     Args:
@@ -75,6 +76,7 @@ def _render_observation(statuses: list[Status], stdout: str, detail: str, extra_
         stdout (str): sandbox.run()の標準出力。(空ならno output)
         detail (str): sandbox.run()の標準エラーまたは例外トレースバック。
         extra_note (str): ステータス固定文の後ろに足す追加の助言。空なら足さない。
+        value (str | None): 最後の式の値(REPLの表示に相当)。無ければ None。
 
     Returns:
         str: 構築したObservation文字列。
@@ -82,6 +84,11 @@ def _render_observation(statuses: list[Status], stdout: str, detail: str, extra_
     label_prefix = "".join(f"[{status.value}]" for status in statuses)
     summary = " ".join(_SUMMARY[status] for status in statuses)
     lines: list[str] = [f"{label_prefix} {summary}", "--- stdout ---", stdout if stdout else "(no output)"]
+    if value is not None:
+        # print し忘れたツール呼び出しの結果も届くようにする(実測: nemotron-3-ultra が
+        # run_command(...) を print せず15反復「出力が無い」と誤解し続けた)
+        lines.append("--- value of the last expression ---")
+        lines.append(value)
     if detail:
         lines.append("--- stderr / traceback ---")
         lines.append(detail)
@@ -105,7 +112,8 @@ def build_observation(result: ExecuteResult) -> str:
             [LABELS] 1行要約 \n\n --- stdout --- \n\n (stderr / traceback) --- \n\n --- note ---
     """
     statuses = collect_statuses(result)
-    return _render_observation(statuses, stdout=result.stdout, detail=result.error or result.stderr)
+    return _render_observation(statuses, stdout=result.stdout, detail=result.error or result.stderr,
+                               value=result.value)
 
 
 # 「散文で考え込んで出力上限に達し、コードフェンスへ到達しなかった」場合の助言。

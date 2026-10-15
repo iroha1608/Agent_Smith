@@ -64,7 +64,10 @@ def _execute(
                 )
                 value = eval(expr, namespace)
                 if value is not None:
-                    result["value"] = repr(value)
+                    # REPLのように最後の式の値を返す。ツールの戻り値(文字列)は repr の引用符や
+                    # エスケープ無しでそのまま読めるよう、文字列は中身を渡す
+                    shown = value if isinstance(value, str) else repr(value)
+                    result["value"] = _truncate(shown, config.max_output_chars)[0]
     except FinalAnswer as answer:
         result = {"kind": "final_answer", "value": str(answer.value)}
     except _Timeout:

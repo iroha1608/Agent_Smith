@@ -15,6 +15,7 @@ import re
 import statistics
 import sys
 from pathlib import Path
+from typing import Any
 
 _PATCH_FILE = re.compile(r"^diff --git a/(\S+) b/", re.MULTILINE)
 
@@ -28,7 +29,7 @@ def _passed(task_dir: Path) -> str:
     return "PASS" if "Overall: PASSED" in text else "FAIL"
 
 
-def _first_step(steps: list[dict[str, object]], tool: str, files: list[str]) -> int | None:
+def _first_step(steps: list[dict[str, Any]], tool: str, files: list[str]) -> int | None:
     """指定ツールを、最終パッチのファイルに対して初めて呼んだステップ番号."""
     for step in steps:
         code = str(step.get("sandbox_input") or "")
@@ -37,7 +38,7 @@ def _first_step(steps: list[dict[str, object]], tool: str, files: list[str]) -> 
     return None
 
 
-def _tests_first_green(steps: list[dict[str, object]]) -> int | None:
+def _tests_first_green(steps: list[dict[str, Any]]) -> int | None:
     """run_tests() の結果で失敗テストが無かった最初のステップ番号."""
     for step in steps:
         code = str(step.get("sandbox_input") or "")
