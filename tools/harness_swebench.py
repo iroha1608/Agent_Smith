@@ -132,7 +132,7 @@ def main(task_ids: str | tuple[str, ...], models: str | tuple[str, ...], workers
     Args:
         task_ids (str | tuple[str, ...]): カンマ区切りのインスタンスID。
         models (str | tuple[str, ...]): カンマ区切りの "プロバイダ名:モデル名"。"production" なら本番の
-            providers_swebench.json(フォールバックあり)で走らせる。
+            providers_swebench.json(フォールバックあり)で、".json" で終わるならその providers 設定ファイルで走らせる。
         workers (int): 並列数(Dockerとレート制限を見て決める)。
         label (str): 保存ディレクトリ名に付ける目印(ablation の before/after 等)。
     """
@@ -150,6 +150,10 @@ def main(task_ids: str | tuple[str, ...], models: str | tuple[str, ...], workers
                 # 本番の設定(providers_swebench.json の順でフォールバックあり)で走らせる。試験の再現用
                 model_dir = run_root / "production"
                 providers_file = REPO_ROOT / "providers" / "providers_swebench.json"
+            elif spec.endswith(".json"):
+                # providers 設定ファイルをそのまま使う(本番の providers.json に無い候補プロバイダの実測用)
+                providers_file = Path(spec).resolve()
+                model_dir = run_root / providers_file.stem
             else:
                 provider_name, _, model = spec.partition(":")
                 model_dir = run_root / f"{provider_name}__{model.replace('/', '_')}"
