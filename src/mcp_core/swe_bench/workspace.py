@@ -582,6 +582,15 @@ class SweWorkspace:
             header.append("[TIMEOUT] the evaluation did not finish in time; the output below is partial.")
         if failing:
             header.append(f"Failing tests ({len(failing)}): " + ", ".join(failing[:20]))
+            # 評価スクリプトが足したテストは実行後に消える。実測(nemotron-3-super, xarray-4629): 失敗した
+            # 隠しテストをリポジトリ内で18反復探し続け、ソースを一度も直さずに上限に達した
+            test_files = self._test_files()
+            if test_files:
+                header.append(
+                    f"Note: the evaluation script replaces {', '.join(test_files[:3])} with its own version while "
+                    "it runs and restores it afterwards, so the tests it adds are NOT in the repository "
+                    "(search_code / read_file cannot find them). Their code and the failing assertion are in the "
+                    "output below: fix the library code, never the tests.")
         if restored:
             header.append(restored)
         header.append("--- test output (between the Start/End markers; DeprecationWarnings removed) ---")

@@ -164,6 +164,8 @@ def test_run_tests_summarizes_and_restores_test_files(repo: Path, tmp_path: Path
     report = _workspace(repo, eval_script).run_tests()
     assert report.startswith("exit_code: 0")
     assert "Failing tests (1): tests/test_ops.py::test_divide" in report
+    # 評価スクリプトが足したテストは実行後に消えるので、探さずに出力から読むよう伝える
+    assert "replaces tests/test_ops.py with its own version" in report and "NOT in the repository" in report
     assert "x.py:1: DeprecationWarning: old" not in report and "import old" not in report
     assert "=== 1 failed in 0.01s ===" in report
     assert (repo / "tests" / "test_ops.py").read_text(encoding="utf-8") == "from calc.ops import divide\n"
