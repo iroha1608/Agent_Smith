@@ -114,7 +114,8 @@ def test_rate_limit_advances_without_backoff(monkeypatch: pytest.MonkeyPatch) ->
     """429は待たず次のキーへ(retry_afterがあっても待たない)。"""
     monkeypatch.setenv("P1_KEY", "k1"); monkeypatch.setenv("P1_KEY_2", "k2")
     providers = [_config("p1", "P1_KEY", 1)]
-    scripts = {"k1": [RateLimitError("429", status=429, retry_after=3.0)], "k2": [_ok_response()]}
+    scripts: dict[str, list[object]] = {
+        "k1": [RateLimitError("429", status=429, retry_after=3.0)], "k2": [_ok_response()]}
     client, slept = _client(providers, scripts)
     res = _gen(client)
     assert res.retries == 1
@@ -178,7 +179,7 @@ def test_bad_request_skips_combo_and_continues(monkeypatch: pytest.MonkeyPatch) 
     """BadRequest(不明モデルID等)はこの組合せを飛ばし、次キー/次モデルを試す。"""
     monkeypatch.setenv("P1_KEY", "k1"); monkeypatch.setenv("P1_KEY_2", "k2")
     providers = [_config("p1", "P1_KEY", 1)]
-    scripts = {"k1": [BadRequestError("400", status=400)], "k2": [_ok_response()]}
+    scripts: dict[str, list[object]] = {"k1": [BadRequestError("400", status=400)], "k2": [_ok_response()]}
     client, slept = _client(providers, scripts)
     res = _gen(client)
     assert res.retries == 1

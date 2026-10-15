@@ -4,6 +4,7 @@
 リポジトリ直下を cwd にし、PYTHONPATH=. で実行する。
 """
 import json
+from typing import Any
 import sys
 import time
 
@@ -33,7 +34,7 @@ BASE = {
 }
 
 # (provider, model, 追加パラメータ, stopを付けるか)
-VARIANTS = [
+VARIANTS: list[tuple[str, str, dict[str, Any], bool]] = [
     ("nvidia", "deepseek-ai/deepseek-v4.1-flash", {"chat_template_kwargs": {"thinking": False}}, True),
     ("nvidia", "deepseek-ai/deepseek-v4.1-flash", {}, False),
     ("nvidia", "z-ai/glm-5.3-flash", {"chat_template_kwargs": {"enable_thinking": False}}, True),
@@ -60,13 +61,14 @@ def main() -> None:
     for provider_name, model, extra_params, use_stop in VARIANTS:
         base_url, keys_env = BASE[provider_name]
         keys = resolve_api_keys(keys_env)
-        payload = {"model": model, "max_tokens": 600,
-                   "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                                {"role": "user", "content": USER_PROMPT}]}
+        payload: dict[str, Any] = {
+            "model": model, "max_tokens": 600,
+            "messages": [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": USER_PROMPT}],
+        }
         if use_stop:
             payload["stop"] = ["<end_code>"]
-        payload.update(extra_params)
-        record = {"provider": provider_name, "model": model, "params": extra_params, "stop": use_stop}
+        payload.update(dict(extra_params))
+        record: dict[str, Any] = {"provider": provider_name, "model": model, "params": extra_params, "stop": use_stop}
         started = time.monotonic()
         try:
             response = requests.post(f"{base_url}/chat/completions", timeout=45,
