@@ -156,8 +156,18 @@ def main(count: int = 5, seed: int = 1, eval_type: str = "mbpp", providers_file:
     if not Path(moulinette).exists():
         raise SystemExit(f"moulinette_eval not found: {moulinette}")
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    run_root = REPO_ROOT / "evaluations" / eval_type / timestamp
-    run_root.mkdir(parents=True, exist_ok=True)
+    # 同じ秒に複数のハーネスを並行で起動すると出力先が衝突し、solution.json を上書きし合う
+    # (実測 10-15: gpt-oss と codestral の計測が同じディレクトリを共有した)。空いている名前を取る
+    (REPO_ROOT / "evaluations" / eval_type).mkdir(parents=True, exist_ok=True)
+    base_timestamp, suffix = timestamp, 1
+    while True:
+        try:
+            run_root = REPO_ROOT / "evaluations" / eval_type / timestamp
+            run_root.mkdir()
+            break
+        except FileExistsError:
+            suffix += 1
+            timestamp = f"{base_timestamp}_{suffix}"
     print(f"[harness] providers={providers_file or 'default'} workers={workers} run={run_root}", flush=True)
 
     tasks = _select(moulinette, count, seed, run_root, wanted)
