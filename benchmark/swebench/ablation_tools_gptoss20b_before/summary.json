@@ -1,0 +1,56 @@
+[
+  {
+    "model": "nvidia:openai/gpt-oss-20b",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 76.2,
+    "passed": false,
+    "iterations": 30,
+    "input_tokens": 100206,
+    "output_tokens": 3007,
+    "time_seconds": 75.7,
+    "total_requests": 30,
+    "retries": 0,
+    "error": "MAX_ITERATIONS",
+    "patch_chars": 0,
+    "models": [
+      "openai/gpt-oss-20b"
+    ],
+    "detail": "tests failed"
+  },
+  {
+    "model": "nvidia:openai/gpt-oss-20b",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 90.7,
+    "passed": true,
+    "iterations": 30,
+    "input_tokens": 77813,
+    "output_tokens": 3682,
+    "time_seconds": 90.2,
+    "total_requests": 30,
+    "retries": 0,
+    "error": "MAX_ITERATIONS",
+    "patch_chars": 590,
+    "models": [
+      "openai/gpt-oss-20b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "nvidia:openai/gpt-oss-20b",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 40.4,
+    "passed": true,
+    "iterations": 19,
+    "input_tokens": 58716,
+    "output_tokens": 1549,
+    "time_seconds": 39.9,
+    "total_requests": 19,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "openai/gpt-oss-20b"
+    ],
+    "detail": "PASSED"
+  }
+]

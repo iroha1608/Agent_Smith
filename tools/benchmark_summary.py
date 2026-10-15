@@ -78,6 +78,8 @@ def summarize(run_dirs: list[Path]) -> None:
                 "seconds": round(float(solution.get("total_time_seconds") or 0.0)),
                 "requests": solution.get("total_requests") or 0,
                 "retries": sum(int(step.get("retries") or 0) for step in steps),
+                # 成功した応答の数(1 step = 1 応答)。total_requests との差が失敗した試行
+                "responses": len(steps),
                 "latency": [float(step.get("request_time_ms") or 0.0) for step in steps if step.get("request_time_ms")],
                 "error": solution.get("error"),
                 "first_read": _first_step(steps, "read_file", patch_files) if patch_files else None,
@@ -92,16 +94,20 @@ def summarize(run_dirs: list[Path]) -> None:
         print(f"| {row['model']} | {row['task']} | {row['result']} | {row['iterations']} | {row['input']:,} | "
               f"{row['output']:,} | {row['seconds']} | {row['error'] or 'final_answer'} |")
 
-    print("\n| Model / provider | Pass | Avg response time per request (s) | Requests | Retries | "
-          "Availability (runs not ended by provider failure) |")
-    print("|---|---|---|---|---|---|")
+    # Requests = 全試行(リトライ込み)。Failed = 応答を得られなかった試行(step 内のリトライと、run を
+    # 打ち切った最後の呼び出しの試行の合計)。Success rate = 応答を得られた試行の割合
+    print("\n| Model / provider | Pass | Avg response time per request (s) | Requests | Failed requests "
+          "(retried or run-ending) | Request success rate | Runs not ended by provider failure |")
+    print("|---|---|---|---|---|---|---|")
     for model in sorted({row["model"] for row in rows}):
         mine = [row for row in rows if row["model"] == model]
         latencies = [value for row in mine for value in row["latency"]]
         available = sum(1 for row in mine if row["error"] != "LLM_UNAVAILABLE")
+        requests = sum(row["requests"] for row in mine)
+        responses = sum(row["responses"] for row in mine)
         print(f"| {model} | {sum(row['result'] == 'PASS' for row in mine)}/{len(mine)} | "
-              f"{statistics.mean(latencies) / 1000 if latencies else 0:.1f} | {sum(row['requests'] for row in mine)} | "
-              f"{sum(row['retries'] for row in mine)} | {available}/{len(mine)} |")
+              f"{statistics.mean(latencies) / 1000 if latencies else 0:.1f} | {requests} | {requests - responses} | "
+              f"{responses / requests if requests else 0:.0%} | {available}/{len(mine)} |")
 
     print("\n| Model / provider | Task | First read of a patched file (step) | First edit (step) | "
           "Iterations from tests passing to final_answer |")

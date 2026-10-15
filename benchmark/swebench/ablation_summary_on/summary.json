@@ -1,0 +1,56 @@
+[
+  {
+    "model": "nvidia:nvidia/nemotron-3-super-120b-a12b",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 186.0,
+    "passed": true,
+    "iterations": 30,
+    "input_tokens": 126751,
+    "output_tokens": 6652,
+    "time_seconds": 185.5,
+    "total_requests": 30,
+    "retries": 0,
+    "error": "MAX_ITERATIONS",
+    "patch_chars": 437,
+    "models": [
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "nvidia:nvidia/nemotron-3-super-120b-a12b",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 302.1,
+    "passed": true,
+    "iterations": 25,
+    "input_tokens": 107110,
+    "output_tokens": 9931,
+    "time_seconds": 301.6,
+    "total_requests": 25,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 590,
+    "models": [
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "nvidia:nvidia/nemotron-3-super-120b-a12b",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 62.2,
+    "passed": true,
+    "iterations": 11,
+    "input_tokens": 56557,
+    "output_tokens": 1172,
+    "time_seconds": 61.7,
+    "total_requests": 11,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "detail": "PASSED"
+  }
+]

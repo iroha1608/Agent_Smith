@@ -128,11 +128,14 @@ Each iteration of `Orchestrator.run()`:
    "Observation:"). The output budget of the request is `min(per-turn cap, remaining tokens)`.
 4. **Extract the code** (Python block; XML / JSON-Hermes / ReAct tool calls are converted to Python
    calls). Leaked stop-sequence fragments are removed; an unclosed block, bare code, over-escaped
-   quotes, a `{"code": ...}` JSON wrapper or several blocks are still executed, and the model is told
-   exactly how its output was interpreted.
+   quotes, extra closing brackets (removed one by one where the parser reports them), a
+   `{"code": ...}` JSON wrapper or several blocks are still executed, and the model is told exactly how
+   its output was interpreted.
 5. **Execute** in the sandbox and build the observation: status labels (`[NO_CODE]`, `[TIMEOUT]`,
    `[TRUNCATED]`, `[MALFORMED_CODE]`, `[REPEATED]` when the same code is run twice, `[BUDGET]` when
-   only one turn of output is left), stdout, the error, and a hint.
+   only one turn of output is left), stdout, the error, and a hint. Calling a tool that does not exist
+   lists the available tools and the closest names; keyword arguments a tool does not have are
+   reported as ignored.
 6. **Submission.** When the code calls `final_answer(...)`, the profile checks the value — MBPP: it
    must be importable function source with no harness code, it must pass the visible tests, and it
    must not return the visible answers as literals; SWE-bench: it must be a git diff (use
@@ -194,9 +197,9 @@ the tools are tested in isolation.
 | Tool | Behaviour |
 |---|---|
 | `read_file(filepath, start_line, end_line)` | `<line>: <content>` lines; clear errors for missing files / bad ranges |
-| `edit_file(filepath, old_str, new_str)` | replaces exactly one occurrence; for `.py` files a syntax error **reverts the edit** and is reported (plus pyflakes warnings when available) |
+| `edit_file(filepath, old_str, new_str)` | replaces exactly one occurrence; for `.py` files a syntax error **reverts the edit** and shows the lines the edit would have produced, with `>>` on the error line (plus pyflakes warnings when available); when `old_str` is not found, lines that differ only in indentation are listed with their leading-whitespace count |
 | `list_files(directory, pattern)` | absolute paths, `.git` skipped, capped |
-| `search_code(pattern, file_pattern)` | `grep -E`; lines formatted `/abs/path.py:<line> <content>` |
+| `search_code(pattern, file_pattern)` | `grep -E`; lines formatted `/abs/path.py:<line> <content>`. `file_pattern` is a file-name glob (`*.py`) or a path: a file, a directory, `pkg/sub/*.py`, `**/*.py`, absolute or relative. "No files match" and "No matches found" are reported separately |
 | `search_function_or_class_definition_in_code(name)` | `def` / `async def` / `class` definitions, same format |
 | `find_references(name, filepath, line)` | whole-word usages in `.py` files, same format |
 | `run_tests()` | runs the task's evaluation script, returns the exit code, the failing test names and the test section of the output, then restores the test files it touched |
