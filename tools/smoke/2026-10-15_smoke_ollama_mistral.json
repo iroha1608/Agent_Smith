@@ -1,0 +1,254 @@
+[
+  {
+    "provider": "mistral",
+    "model": "codestral-latest",
+    "ok": true,
+    "in_tok": 148,
+    "out_tok": 120,
+    "has_fence": true,
+    "chars": 337,
+    "text_head": "Thought: I'll create a function that uses set intersection to find the shared elements between two lists.\n```python\ndef similar_elements(list1, list2):\n    return list(set(list1) & set(list2))\n\nassert set(similar_elements((3, 4, 5, 6),(5, 7, 4, 10))) == set((4, 5))\nassert set(similar_elements((1, 2, 3, 4),(5, 4, 3, 7))) == set((3, 4))\n",
+    "latency_sec": 1.18,
+    "ratelimit_headers": {
+      "x-ratelimit-limit-tokens-minute": "625000",
+      "x-ratelimit-remaining-tokens-minute": "624732",
+      "x-ratelimit-tokens-query-cost": "268",
+      "x-ratelimit-limit-req-minute": "125",
+      "x-ratelimit-remaining-req-minute": "124"
+    },
+    "message_keys": [
+      "content",
+      "role",
+      "tool_calls"
+    ],
+    "finish_reason": "stop"
+  },
+  {
+    "provider": "mistral",
+    "model": "mistral-small-latest",
+    "ok": false,
+    "error": "RateLimitError",
+    "status": 429,
+    "message": "('LLM HTTP 429: {\"object\":\"error\",\"message\":\"Rate limit exceeded\",\"type\":\"rate_limited\",\"param\":null,\"code\":\"1300\",\"raw_status_code\":429}', 429, None)",
+    "latency_sec": 0.4,
+    "ratelimit_headers": {
+      "x-ratelimit-limit-req-minute": "0",
+      "x-ratelimit-remaining-req-minute": "0"
+    }
+  },
+  {
+    "provider": "mistral",
+    "model": "mistral-medium-latest",
+    "ok": false,
+    "error": "RateLimitError",
+    "status": 429,
+    "message": "('LLM HTTP 429: {\"object\":\"error\",\"message\":\"Rate limit exceeded\",\"type\":\"rate_limited\",\"param\":null,\"code\":\"1300\",\"raw_status_code\":429}', 429, None)",
+    "latency_sec": 0.41,
+    "ratelimit_headers": {
+      "x-ratelimit-limit-req-minute": "0",
+      "x-ratelimit-remaining-req-minute": "0"
+    }
+  },
+  {
+    "provider": "mistral",
+    "model": "magistral-small-latest",
+    "ok": false,
+    "error": "RateLimitError",
+    "status": 429,
+    "message": "('LLM HTTP 429: {\"object\":\"error\",\"message\":\"Rate limit exceeded\",\"type\":\"rate_limited\",\"param\":null,\"code\":\"1300\",\"raw_status_code\":429}', 429, None)",
+    "latency_sec": 0.4,
+    "ratelimit_headers": {
+      "x-ratelimit-limit-req-minute": "0",
+      "x-ratelimit-remaining-req-minute": "0"
+    }
+  },
+  {
+    "provider": "mistral",
+    "model": "ministral-14b-latest",
+    "ok": true,
+    "in_tok": 148,
+    "out_tok": 52,
+    "has_fence": true,
+    "chars": 240,
+    "text_head": "Thought: The task requires finding the intersection of two lists, which can be efficiently done by converting them to sets and using set intersection.\n\n```python\ndef similar_elements(list1, list2):\n    return list(set(list1) & set(list2))\n\n",
+    "latency_sec": 1.07,
+    "ratelimit_headers": {
+      "x-ratelimit-limit-tokens-minute": "937500",
+      "x-ratelimit-remaining-tokens-minute": "937300",
+      "x-ratelimit-tokens-query-cost": "200",
+      "x-ratelimit-limit-req-minute": "30",
+      "x-ratelimit-remaining-req-minute": "29"
+    },
+    "message_keys": [
+      "content",
+      "role",
+      "tool_calls"
+    ],
+    "finish_reason": "stop"
+  },
+  {
+    "provider": "mistral",
+    "model": "mistral-code-latest",
+    "ok": true,
+    "in_tok": 148,
+    "out_tok": 120,
+    "has_fence": true,
+    "chars": 337,
+    "text_head": "Thought: I'll create a function that uses set intersection to find the shared elements between two lists.\n```python\ndef similar_elements(list1, list2):\n    return list(set(list1) & set(list2))\n\nassert set(similar_elements((3, 4, 5, 6),(5, 7, 4, 10))) == set((4, 5))\nassert set(similar_elements((1, 2, 3, 4),(5, 4, 3, 7))) == set((3, 4))\n",
+    "latency_sec": 1.44,
+    "ratelimit_headers": {
+      "x-ratelimit-limit-tokens-minute": "625000",
+      "x-ratelimit-remaining-tokens-minute": "624464",
+      "x-ratelimit-tokens-query-cost": "268",
+      "x-ratelimit-limit-req-minute": "125",
+      "x-ratelimit-remaining-req-minute": "123"
+    },
+    "message_keys": [
+      "content",
+      "role",
+      "tool_calls"
+    ],
+    "finish_reason": "stop"
+  },
+  {
+    "provider": "ollama",
+    "model": "kimi-k2.7-code",
+    "ok": false,
+    "error": "BadRequestError",
+    "status": 402,
+    "message": "('LLM HTTP 402 (bad request): {\"error\":{\"message\":\"this model is not included in your free usage, add usage credits to pay as you go: https://ollama.com/settings or upgrade for included usage: https://ollama.com/upgrade. Try gemma4:31b-cloud, which is in the Free plan. (ref: f24df557-0a43-4a6d-8dee-",
+    "latency_sec": 0.3,
+    "ratelimit_headers": {}
+  },
+  {
+    "provider": "ollama",
+    "model": "glm-5.3",
+    "ok": false,
+    "error": "BadRequestError",
+    "status": 402,
+    "message": "('LLM HTTP 402 (bad request): {\"error\":{\"message\":\"this model is not included in your free usage, add usage credits to pay as you go: https://ollama.com/settings or upgrade for included usage: https://ollama.com/upgrade. Try gemma4:31b-cloud, which is in the Free plan. (ref: c21aabad-6305-4b07-a5c0-",
+    "latency_sec": 0.75,
+    "ratelimit_headers": {}
+  },
+  {
+    "provider": "ollama",
+    "model": "glm-5.3-flash",
+    "ok": false,
+    "error": "BadRequestError",
+    "status": 402,
+    "message": "('LLM HTTP 402 (bad request): {\"error\":{\"message\":\"this model is not included in your free usage, add usage credits to pay as you go: https://ollama.com/settings or upgrade for included usage: https://ollama.com/upgrade. Try gemma4:31b-cloud, which is in the Free plan. (ref: da7969ca-2533-46fe-8af8-",
+    "latency_sec": 0.3,
+    "ratelimit_headers": {}
+  },
+  {
+    "provider": "ollama",
+    "model": "deepseek-v4.1-flash",
+    "ok": false,
+    "error": "BadRequestError",
+    "status": 402,
+    "message": "('LLM HTTP 402 (bad request): {\"error\":{\"message\":\"this model is not included in your free usage, add usage credits to pay as you go: https://ollama.com/settings or upgrade for included usage: https://ollama.com/upgrade. Try gemma4:31b-cloud, which is in the Free plan. (ref: b04d7de3-9395-4a78-a7c8-",
+    "latency_sec": 0.28,
+    "ratelimit_headers": {}
+  },
+  {
+    "provider": "ollama",
+    "model": "deepseek-v4-pro:0813",
+    "ok": false,
+    "error": "BadRequestError",
+    "status": 402,
+    "message": "('LLM HTTP 402 (bad request): {\"error\":{\"message\":\"this model is not included in your free usage, add usage credits to pay as you go: https://ollama.com/settings or upgrade for included usage: https://ollama.com/upgrade. Try gemma4:31b-cloud, which is in the Free plan. (ref: 3fdee168-266d-4bd1-babf-",
+    "latency_sec": 0.27,
+    "ratelimit_headers": {}
+  },
+  {
+    "provider": "ollama",
+    "model": "minimax-m3",
+    "ok": false,
+    "error": "BadRequestError",
+    "status": 402,
+    "message": "('LLM HTTP 402 (bad request): {\"error\":{\"message\":\"this model is not included in your free usage, add usage credits to pay as you go: https://ollama.com/settings or upgrade for included usage: https://ollama.com/upgrade. Try gemma4:31b-cloud, which is in the Free plan. (ref: 1d0bacdc-a6ae-4b2f-8aef-",
+    "latency_sec": 0.27,
+    "ratelimit_headers": {}
+  },
+  {
+    "provider": "ollama",
+    "model": "mistral-large-4",
+    "ok": false,
+    "error": "AuthenticationError",
+    "status": 403,
+    "message": "('LLM HTTP 403 (auth / quota): {\"error\":{\"message\":\"This model is currently being rolled out and is not yet available to you. Please check back later. (ref: 9763c5d4-9607-4652-9265-3992c976a243)\",\"type\":\"api_error\",\"param\":null,\"code\":null}}\\n', 403, None)",
+    "latency_sec": 0.27,
+    "ratelimit_headers": {}
+  },
+  {
+    "provider": "ollama",
+    "model": "gpt-oss:120b",
+    "ok": true,
+    "in_tok": 213,
+    "out_tok": 32,
+    "has_fence": false,
+    "chars": 137,
+    "text_head": "We need to output a Thought line and then a fenced python block with code that defines function similar_elements and checks asserts. Use ",
+    "latency_sec": 1.06,
+    "ratelimit_headers": {},
+    "message_keys": [
+      "content",
+      "reasoning",
+      "role"
+    ],
+    "finish_reason": "stop"
+  },
+  {
+    "provider": "ollama",
+    "model": "gpt-oss:20b",
+    "ok": true,
+    "in_tok": 213,
+    "out_tok": 37,
+    "has_fence": false,
+    "chars": 153,
+    "text_head": "We need to produce a short line starting with Thought: and then a fenced code block with the function and assert tests. The fenced block should end with ",
+    "latency_sec": 1.19,
+    "ratelimit_headers": {},
+    "message_keys": [
+      "content",
+      "reasoning",
+      "role"
+    ],
+    "finish_reason": "stop"
+  },
+  {
+    "provider": "ollama",
+    "model": "nemotron-3-super",
+    "ok": true,
+    "in_tok": 159,
+    "out_tok": 172,
+    "has_fence": false,
+    "chars": 832,
+    "text_head": "We need to write function similar_elements that takes two lists (or tuples) and returns shared elements. The test uses set conversion: similar_elements returns maybe list of shared elements (with duplicates? but set equality). We'll implement to return list of elements present in both, maybe preserving order from first? Or just set intersection. Use set intersection and convert to list. Use list c",
+    "latency_sec": 5.91,
+    "ratelimit_headers": {},
+    "message_keys": [
+      "content",
+      "reasoning",
+      "role"
+    ],
+    "finish_reason": "stop"
+  },
+  {
+    "provider": "ollama",
+    "model": "gemma4:31b",
+    "ok": true,
+    "in_tok": 163,
+    "out_tok": 137,
+    "has_fence": true,
+    "chars": 355,
+    "text_head": "Thought: The function can be implemented by converting both input lists/tuples to sets and finding their intersection.\n\n```python\ndef similar_elements(list1, list2):\n    return list(set(list1) & set(list2))\n\nassert set(similar_elements((3, 4, 5, 6),(5, 7, 4, 10))) == set((4, 5))\nassert set(similar_elements((1, 2, 3, 4),(5, 4, 3, 7))) == set((3, 4))\n```\n",
+    "latency_sec": 0.83,
+    "ratelimit_headers": {},
+    "message_keys": [
+      "content",
+      "role"
+    ],
+    "finish_reason": "stop"
+  }
+]

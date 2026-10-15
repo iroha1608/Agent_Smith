@@ -46,8 +46,13 @@ CANDIDATES = {
     "cohere": ("https://api.cohere.ai/compatibility/v1", "COHERE_API_KEY", [
         "command-a-03-2025", "command-a-plus-05-2026", "command-a-reasoning-08-2025", "north-mini-code-1-0",
     ]),
+    # Ollama Cloud(OpenAI互換 /v1)。一覧は GET https://ollama.com/v1/models(10-15 時点で18モデル)
+    "ollama": ("https://ollama.com/v1", "OLLAMA_API_KEY", [
+        "kimi-k2.7-code", "glm-5.3", "glm-5.3-flash", "deepseek-v4.1-flash", "deepseek-v4-pro:0813",
+        "minimax-m3", "mistral-large-4", "gpt-oss:120b", "gpt-oss:20b", "nemotron-3-super", "gemma4:31b",
+    ]),
 }
-SLEEP_BETWEEN_SEC = {"gemini": 4.0, "nvidia": 2.0, "mistral": 2.0, "cohere": 4.0}
+SLEEP_BETWEEN_SEC = {"gemini": 4.0, "nvidia": 2.0, "mistral": 2.0, "cohere": 4.0, "ollama": 2.0}
 
 
 class RecordingTransport(RequestsTransport):

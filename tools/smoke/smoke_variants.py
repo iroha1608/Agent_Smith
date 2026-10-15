@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 from src.agent.llm.key_manager import resolve_api_keys
 
 OUT_PATH = sys.argv[1]
+# 2つ目以降の引数があれば、そのプロバイダのバリアントだけを試す
+ONLY = set(sys.argv[2:])
 
 SYSTEM_PROMPT = (
     "You are a Python coding agent. Reply with a short line starting with 'Thought:' and then exactly one "
@@ -31,6 +33,7 @@ BASE = {
     "nvidia": ("https://integrate.api.nvidia.com/v1", "NVIDIA_API_KEY"),
     "mistral": ("https://api.mistral.ai/v1", "MISTRAL_API_KEY"),
     "cohere": ("https://api.cohere.ai/compatibility/v1", "COHERE_API_KEY"),
+    "ollama": ("https://ollama.com/v1", "OLLAMA_API_KEY"),
 }
 
 # (provider, model, 追加パラメータ, stopを付けるか)
@@ -51,6 +54,15 @@ VARIANTS: list[tuple[str, str, dict[str, Any], bool]] = [
     ("gemini", "gemini-3.5-flash", {}, True),
     ("gemini", "gemini-3.8-flash", {}, True),
     ("mistral", "mistral-small-latest", {}, True),
+    # Ollama Cloud: 思考の中で <end_code> に触れて本文が空になるモデルの、思考を切る指定を探す
+    ("ollama", "gpt-oss:120b", {"reasoning_effort": "low"}, True),
+    ("ollama", "gpt-oss:120b", {}, False),
+    ("ollama", "gpt-oss:20b", {"reasoning_effort": "low"}, True),
+    ("ollama", "nemotron-3-super", {"reasoning_effort": "none"}, True),
+    ("ollama", "nemotron-3-super", {"think": False}, True),
+    ("ollama", "nemotron-3-super", {"chat_template_kwargs": {"enable_thinking": False}}, True),
+    ("ollama", "nemotron-3-super", {}, False),
+    ("ollama", "gemma4:31b", {}, True),
 ]
 
 
@@ -59,6 +71,8 @@ def main() -> None:
     load_dotenv(dotenv_path=".env")  # cwd(リポジトリ直下)の.envを環境変数へ読み込む
     results = []
     for provider_name, model, extra_params, use_stop in VARIANTS:
+        if ONLY and provider_name not in ONLY:
+            continue
         base_url, keys_env = BASE[provider_name]
         keys = resolve_api_keys(keys_env)
         payload: dict[str, Any] = {
