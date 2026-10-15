@@ -1,0 +1,56 @@
+[
+  {
+    "model": "mistral:codestral-latest",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 190.7,
+    "passed": false,
+    "iterations": 30,
+    "input_tokens": 177412,
+    "output_tokens": 5171,
+    "time_seconds": 190.3,
+    "total_requests": 30,
+    "retries": 0,
+    "error": "MAX_ITERATIONS",
+    "patch_chars": 0,
+    "models": [
+      "codestral-latest"
+    ],
+    "detail": "tests failed"
+  },
+  {
+    "model": "mistral:codestral-latest",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 15.5,
+    "passed": true,
+    "iterations": 4,
+    "input_tokens": 8827,
+    "output_tokens": 246,
+    "time_seconds": 15.0,
+    "total_requests": 4,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 590,
+    "models": [
+      "codestral-latest"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "mistral:codestral-latest",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 23.9,
+    "passed": true,
+    "iterations": 6,
+    "input_tokens": 19100,
+    "output_tokens": 435,
+    "time_seconds": 23.4,
+    "total_requests": 6,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "codestral-latest"
+    ],
+    "detail": "PASSED"
+  }
+]

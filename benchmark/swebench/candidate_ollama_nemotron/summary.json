@@ -1,0 +1,56 @@
+[
+  {
+    "model": "tools/smoke/candidates/ollama_nemotron-3-super.json",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 67.5,
+    "passed": true,
+    "iterations": 11,
+    "input_tokens": 39430,
+    "output_tokens": 1402,
+    "time_seconds": 67.0,
+    "total_requests": 11,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 437,
+    "models": [
+      "nemotron-3-super"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "tools/smoke/candidates/ollama_nemotron-3-super.json",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 30.6,
+    "passed": true,
+    "iterations": 6,
+    "input_tokens": 15620,
+    "output_tokens": 491,
+    "time_seconds": 30.1,
+    "total_requests": 6,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 590,
+    "models": [
+      "nemotron-3-super"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "tools/smoke/candidates/ollama_nemotron-3-super.json",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 67.2,
+    "passed": true,
+    "iterations": 15,
+    "input_tokens": 61229,
+    "output_tokens": 1282,
+    "time_seconds": 66.6,
+    "total_requests": 15,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "nemotron-3-super"
+    ],
+    "detail": "PASSED"
+  }
+]

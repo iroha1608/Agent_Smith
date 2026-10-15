@@ -1,0 +1,56 @@
+[
+  {
+    "model": "tools/smoke/candidates/ollama_gemma4-31b.json",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 42.5,
+    "passed": true,
+    "iterations": 15,
+    "input_tokens": 73582,
+    "output_tokens": 4622,
+    "time_seconds": 42.0,
+    "total_requests": 15,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 437,
+    "models": [
+      "gemma4:31b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "tools/smoke/candidates/ollama_gemma4-31b.json",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 19.9,
+    "passed": true,
+    "iterations": 5,
+    "input_tokens": 15432,
+    "output_tokens": 492,
+    "time_seconds": 19.4,
+    "total_requests": 5,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 590,
+    "models": [
+      "gemma4:31b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "tools/smoke/candidates/ollama_gemma4-31b.json",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 21.8,
+    "passed": true,
+    "iterations": 7,
+    "input_tokens": 27949,
+    "output_tokens": 1149,
+    "time_seconds": 21.3,
+    "total_requests": 7,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "gemma4:31b"
+    ],
+    "detail": "PASSED"
+  }
+]
