@@ -4,7 +4,8 @@
 - SWE_DOCKER_IMAGE がある : そのイメージからコンテナを1つ起動し(--network none)、中で実行する。
 - 無い                    : ホストの TESTBED_PATH で実行する(採点側がツールを単体で試すときの形)。
 その他の環境変数: TESTBED_PATH(既定 /testbed) / SWE_CONTAINER_NAME / SWE_EVAL_SCRIPT_FILE /
-SWE_COMMAND_TIMEOUT(既定120) / SWE_TEST_TIMEOUT(既定300) / SWE_DEADLINE_EPOCH(締め切りのUNIX時刻)。
+SWE_COMMAND_TIMEOUT(既定120) / SWE_TEST_TIMEOUT(既定300) / SWE_DEADLINE_EPOCH(締め切りのUNIX時刻) /
+SWE_RAW_TEST_OUTPUT(1 なら run_tests の出力を要約しない。BENCHMARK_REPORT の ablation 用)。
 
 stdio(既定)または streamable HTTP(--transport http)で待ち受ける。終了時(stdinのEOF / SIGTERM /
 SIGINT / 例外)にはコンテナを必ず削除する。
@@ -66,6 +67,7 @@ def build_workspace() -> SweWorkspace:
         command_timeout=_float_env("SWE_COMMAND_TIMEOUT", 120.0) or 120.0,
         test_timeout=_float_env("SWE_TEST_TIMEOUT", 300.0) or 300.0,
         deadline_epoch=_float_env("SWE_DEADLINE_EPOCH", None),
+        summarize_tests=os.environ.get("SWE_RAW_TEST_OUTPUT", "") not in ("1", "true", "yes"),
     )
 
 

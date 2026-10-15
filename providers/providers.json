@@ -58,7 +58,7 @@
             "priority": 4,
             "model_params": {
                 "gemini-3.5-flash-lite": {
-                    "reasoning_effort": "low"
+                    "reasoning_effort": "minimal"
                 }
             }
         },

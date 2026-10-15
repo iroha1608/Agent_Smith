@@ -223,6 +223,7 @@ class SweWorkspace:
         test_timeout: float = 300.0,
         deadline_epoch: float | None = None,
         clock: Callable[[], float] = time.time,
+        summarize_tests: bool = True,
     ) -> None:
         """設定を保持する.
 
@@ -234,6 +235,8 @@ class SweWorkspace:
             test_timeout (float): run_tests の既定の制限時間(秒)。
             deadline_epoch (float | None): タスク全体の締め切り(UNIX時刻)。
             clock (Callable[[], float]): 現在時刻を返す関数(テスト用に差し替え可能)。
+            summarize_tests (bool): run_tests の出力を要約するか(False なら生の出力の末尾を返す。
+                BENCHMARK_REPORT の ablation 用)。
         """
         self.executor = executor
         self.testbed = testbed.rstrip("/") or "/"
@@ -242,6 +245,7 @@ class SweWorkspace:
         self.test_timeout = test_timeout
         self.deadline_epoch = deadline_epoch
         self._clock = clock
+        self.summarize_tests = summarize_tests
 
     # ---- 共通 -----------------------------------------------------------------
     def _budget(self, wanted: float) -> float | None:
@@ -504,6 +508,9 @@ class SweWorkspace:
         restored = self._restore_test_files()
         if isinstance(result, str):
             return result
+        if not self.summarize_tests:
+            # ablation 用: 要約せず、評価スクリプトの生の出力の末尾をそのまま返す
+            return f"exit_code: {result.exit_code}\n" + clip(result.stdout + result.stderr, OUTPUT_LIMIT, tail_ratio=0.7)
         body, failing = summarize_test_output(result.stdout + result.stderr)
         header = [f"exit_code: {result.exit_code}  elapsed: {elapsed:.0f}s"]
         if result.timed_out:
