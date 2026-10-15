@@ -1,0 +1,326 @@
+[
+  {
+    "model": "nvidia:nvidia/nemotron-3-super-120b-a12b",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 53.7,
+    "passed": true,
+    "iterations": 14,
+    "input_tokens": 58513,
+    "output_tokens": 1618,
+    "time_seconds": 53.3,
+    "total_requests": 14,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 437,
+    "models": [
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "cohere:command-a-03-2025",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 51.1,
+    "passed": true,
+    "iterations": 15,
+    "input_tokens": 52497,
+    "output_tokens": 2507,
+    "time_seconds": 50.6,
+    "total_requests": 15,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 776,
+    "models": [
+      "command-a-03-2025"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "gemini:gemini-3.5-flash-lite",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 19.4,
+    "passed": false,
+    "iterations": 2,
+    "input_tokens": 10742,
+    "output_tokens": 1355,
+    "time_seconds": 18.9,
+    "total_requests": 3,
+    "retries": 0,
+    "error": "LLM_UNAVAILABLE",
+    "patch_chars": 0,
+    "models": [
+      "gemini-3.5-flash-lite"
+    ],
+    "detail": "tests failed"
+  },
+  {
+    "model": "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 151.9,
+    "passed": false,
+    "iterations": 30,
+    "input_tokens": 97289,
+    "output_tokens": 3193,
+    "time_seconds": 151.5,
+    "total_requests": 30,
+    "retries": 0,
+    "error": "MAX_ITERATIONS",
+    "patch_chars": 0,
+    "models": [
+      "nvidia/nemotron-3-ultra-550b-a55b"
+    ],
+    "detail": "tests failed"
+  },
+  {
+    "model": "gemini:gemma-4-31b-it",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 169.8,
+    "passed": false,
+    "iterations": 2,
+    "input_tokens": 4510,
+    "output_tokens": 912,
+    "time_seconds": 169.2,
+    "total_requests": 7,
+    "retries": 2,
+    "error": "LLM_UNAVAILABLE",
+    "patch_chars": 0,
+    "models": [
+      "gemma-4-31b-it"
+    ],
+    "detail": "tests failed"
+  },
+  {
+    "model": "nvidia:openai/gpt-oss-20b",
+    "instance_id": "sympy__sympy-14711",
+    "wall_seconds": 37.8,
+    "passed": false,
+    "iterations": 30,
+    "input_tokens": 108218,
+    "output_tokens": 2419,
+    "time_seconds": 37.3,
+    "total_requests": 30,
+    "retries": 0,
+    "error": "MAX_ITERATIONS",
+    "patch_chars": 0,
+    "models": [
+      "openai/gpt-oss-20b"
+    ],
+    "detail": "tests failed"
+  },
+  {
+    "model": "nvidia:nvidia/nemotron-3-super-120b-a12b",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 122.7,
+    "passed": true,
+    "iterations": 14,
+    "input_tokens": 52331,
+    "output_tokens": 3816,
+    "time_seconds": 122.2,
+    "total_requests": 14,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 590,
+    "models": [
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "cohere:command-a-03-2025",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 19.5,
+    "passed": true,
+    "iterations": 5,
+    "input_tokens": 11315,
+    "output_tokens": 308,
+    "time_seconds": 18.9,
+    "total_requests": 5,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 590,
+    "models": [
+      "command-a-03-2025"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "gemini:gemini-3.5-flash-lite",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 7.5,
+    "passed": false,
+    "iterations": 1,
+    "input_tokens": 6837,
+    "output_tokens": 600,
+    "time_seconds": 7.1,
+    "total_requests": 2,
+    "retries": 0,
+    "error": "LLM_UNAVAILABLE",
+    "patch_chars": 0,
+    "models": [
+      "gemini-3.5-flash-lite"
+    ],
+    "detail": "tests failed"
+  },
+  {
+    "model": "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 37.0,
+    "passed": true,
+    "iterations": 6,
+    "input_tokens": 14859,
+    "output_tokens": 443,
+    "time_seconds": 36.5,
+    "total_requests": 6,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 590,
+    "models": [
+      "nvidia/nemotron-3-ultra-550b-a55b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "gemini:gemma-4-31b-it",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 241.8,
+    "passed": false,
+    "iterations": 6,
+    "input_tokens": 17268,
+    "output_tokens": 1882,
+    "time_seconds": 241.3,
+    "total_requests": 10,
+    "retries": 2,
+    "error": "LLM_UNAVAILABLE",
+    "patch_chars": 0,
+    "models": [
+      "gemma-4-31b-it"
+    ],
+    "detail": "tests failed"
+  },
+  {
+    "model": "nvidia:openai/gpt-oss-20b",
+    "instance_id": "sympy__sympy-13480",
+    "wall_seconds": 23.8,
+    "passed": true,
+    "iterations": 9,
+    "input_tokens": 22932,
+    "output_tokens": 843,
+    "time_seconds": 23.4,
+    "total_requests": 9,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 590,
+    "models": [
+      "openai/gpt-oss-20b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "nvidia:nvidia/nemotron-3-super-120b-a12b",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 49.1,
+    "passed": true,
+    "iterations": 11,
+    "input_tokens": 41636,
+    "output_tokens": 1420,
+    "time_seconds": 48.6,
+    "total_requests": 11,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "cohere:command-a-03-2025",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 16.9,
+    "passed": true,
+    "iterations": 5,
+    "input_tokens": 15737,
+    "output_tokens": 388,
+    "time_seconds": 16.5,
+    "total_requests": 5,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "command-a-03-2025"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "gemini:gemini-3.5-flash-lite",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 19.0,
+    "passed": true,
+    "iterations": 1,
+    "input_tokens": 2674,
+    "output_tokens": 519,
+    "time_seconds": 18.5,
+    "total_requests": 1,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "gemini-3.5-flash-lite"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "nvidia:nvidia/nemotron-3-ultra-550b-a55b",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 130.4,
+    "passed": true,
+    "iterations": 17,
+    "input_tokens": 89057,
+    "output_tokens": 1706,
+    "time_seconds": 130.0,
+    "total_requests": 17,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "nvidia/nemotron-3-ultra-550b-a55b"
+    ],
+    "detail": "PASSED"
+  },
+  {
+    "model": "gemini:gemma-4-31b-it",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 293.8,
+    "passed": false,
+    "iterations": 3,
+    "input_tokens": 9616,
+    "output_tokens": 1231,
+    "time_seconds": 293.4,
+    "total_requests": 9,
+    "retries": 3,
+    "error": "LLM_UNAVAILABLE",
+    "patch_chars": 0,
+    "models": [
+      "gemma-4-31b-it"
+    ],
+    "detail": "tests failed"
+  },
+  {
+    "model": "nvidia:openai/gpt-oss-20b",
+    "instance_id": "pydata__xarray-4629",
+    "wall_seconds": 25.3,
+    "passed": true,
+    "iterations": 11,
+    "input_tokens": 42443,
+    "output_tokens": 1174,
+    "time_seconds": 24.9,
+    "total_requests": 11,
+    "retries": 0,
+    "error": null,
+    "patch_chars": 503,
+    "models": [
+      "openai/gpt-oss-20b"
+    ],
+    "detail": "PASSED"
+  }
+]

@@ -21,12 +21,13 @@ _PATCH_FILE = re.compile(r"^diff --git a/(\S+) b/", re.MULTILINE)
 
 
 def _passed(task_dir: Path) -> str:
-    """validate.log から合否を返す."""
-    log = task_dir / "validate.log"
-    if not log.exists():
-        return "n/a"
-    text = log.read_text(encoding="utf-8", errors="replace")
-    return "PASS" if "Overall: PASSED" in text else "FAIL"
+    """validate.log(リポジトリに取り込んだ要約なら validate_summary.txt)から合否を返す."""
+    for name in ("validate.log", "validate_summary.txt"):
+        log = task_dir / name
+        if log.exists():
+            text = log.read_text(encoding="utf-8", errors="replace")
+            return "PASS" if "Overall: PASSED" in text else "FAIL"
+    return "n/a"
 
 
 def _first_step(steps: list[dict[str, Any]], tool: str, files: list[str]) -> int | None:
@@ -38,13 +39,21 @@ def _first_step(steps: list[dict[str, Any]], tool: str, files: list[str]) -> int
     return None
 
 
+_PASSED_SUMMARY = re.compile(r"\b\d+ passed\b")
+_FAILED_SUMMARY = re.compile(r"\b\d+ (failed|exceptions?|errors?)\b")
+
+
 def _tests_first_green(steps: list[dict[str, Any]]) -> int | None:
-    """run_tests() の結果で失敗テストが無かった最初のステップ番号."""
+    """run_tests() の結果が全部通った最初のステップ番号.
+
+    モデルは run_tests()[-1500:] のように末尾だけを表示することがあるので、先頭の見出しではなく
+    テストランナーの要約行(pytest の "N passed" / sympy の "tests finished: N passed")で判定する。
+    """
     for step in steps:
         code = str(step.get("sandbox_input") or "")
         output = str(step.get("sandbox_output") or "")
-        if "run_tests()" in code and "exit_code:" in output and "Failing tests" not in output \
-                and "[TIMEOUT]" not in output:
+        if "run_tests(" in code and "Failing tests" not in output and "[TIMEOUT]" not in output \
+                and _PASSED_SUMMARY.search(output) and not _FAILED_SUMMARY.search(output):
             return int(step.get("step") or 0)
     return None
 
