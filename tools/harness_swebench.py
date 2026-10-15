@@ -142,11 +142,12 @@ def main(task_ids: str | tuple[str, ...], models: str | tuple[str, ...], workers
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_root = REPO_ROOT / "evaluations" / "swebench" / (f"{timestamp}_{label}" if label else timestamp)
     jobs: list[tuple[str, str, Path, Path]] = []
-    for spec in split(models):
-        provider_name, _, model = spec.partition(":")
-        model_dir = run_root / f"{provider_name}__{model.replace('/', '_')}"
-        providers_file = _single_model_providers(provider_name, model, model_dir / "providers.json")
-        for instance_id in split(task_ids):
+    # タスクごとにモデルを交互に並べる(同じプロバイダのモデルが同時に走ってレート制限に当たりにくくする)
+    for instance_id in split(task_ids):
+        for spec in split(models):
+            provider_name, _, model = spec.partition(":")
+            model_dir = run_root / f"{provider_name}__{model.replace('/', '_')}"
+            providers_file = _single_model_providers(provider_name, model, model_dir / "providers.json")
             task_path = model_dir / instance_id / "task.json"
             _dump(instance_id, task_path)
             jobs.append((spec, instance_id, task_path, providers_file))
